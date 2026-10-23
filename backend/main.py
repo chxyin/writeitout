@@ -35,9 +35,7 @@ class POIRequest(BaseModel):
 
 @app.get("/api/random-speech")
 async def random_speech():
-    speech_file = Path(__file__).resolve().parent / "generated_speeches_batch.json"
-    if not speech_file.exists():
-        speech_file = Path(__file__).resolve().parent.parent / "generated_speeches_batch.json"
+    speech_file = Path("generated_speeches_batch.json")
 
     if not speech_file.exists():
         raise HTTPException(status_code=404, detail=f"Speech dataset not found at {speech_file}")
