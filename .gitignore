@@ -1,2 +1,13 @@
-".env" 
-"archive/" 
+.env
+backend/.env
+
+__pycache__/
+*.py[cod]
+backend/venv/
+venv/
+frontend/node_modules/
+frontend/dist/
+.vscode/
+.DS_Store
+
+archive/
