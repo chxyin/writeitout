@@ -127,15 +127,15 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 
 .app-container { position: relative; z-index: 1; width: 100%; max-width: 600px; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; transition: max-width 0.45s var(--ease-out-premium); }
 .app-container.mode-full { max-width: 1200px; }
-.mode-full .progress-bar,
-.mode-full > .toggle-container { grid-column: 1 / -1; }
-.mode-full { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); align-items: start; }
-.mode-full .drill-form { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 1.5rem; align-items: start; }
-.mode-full .prompt-card { grid-column: 1; grid-row: 1 / span 2; max-height: 65vh; overflow-y: auto; }
-.mode-full .poi-input-area,
-.mode-full .submit-btn { grid-column: 2; }
+.split-panes { display: contents; }
+.left-pane,
+.right-pane { display: contents; }
+.mode-full .split-panes { display: flex; flex-direction: row; gap: 2rem; align-items: stretch; }
+.mode-full .left-pane { display: block; flex: 6; min-width: 0; }
+.mode-full .right-pane { display: flex; flex: 4; min-width: 0; flex-direction: column; gap: 1.5rem; }
+.mode-full .prompt-card { height: 70vh; max-height: 70vh; overflow-y: auto; }
 .mode-full .submit-btn { margin-top: 0; }
-.mode-full > .feedback-card { grid-column: 1 / -1; }
+.mode-full > .feedback-card { align-self: center; width: 100%; }
 .progress-bar { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; }
 .progress-fill { width: 40%; height: 100%; background: var(--accent-orange); border-radius: 10px; transition: width 0.45s var(--ease-out-premium); }
 
@@ -297,8 +297,10 @@ textarea:focus {
   .settings-menu { width: min(260px, calc(100vw - 24px)); right: -4px; }
   .app-container,
   .app-container.mode-full { max-width: 680px; padding: 3.5rem 1rem 1rem; gap: 1.15rem; }
-  .mode-full .drill-form { display: flex; }
-  .mode-full .prompt-card { max-height: 42vh; }
+  .mode-full .split-panes { display: flex; flex-direction: column; gap: 1.15rem; }
+  .mode-full .left-pane,
+  .mode-full .right-pane { display: flex; flex-direction: column; gap: 1.15rem; }
+  .mode-full .prompt-card { height: 42vh; max-height: 42vh; }
   .drill-form { gap: 1.15rem; }
   .prompt-card { padding: 1.25rem; font-size: 1rem; }
   textarea { min-height: 120px; height: 28vw; max-height: 180px; padding: 1rem; font-size: 16px; }

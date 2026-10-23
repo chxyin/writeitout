@@ -261,29 +261,37 @@ export default function App() {
           </div>
         ) : !showFeedback ? (
           <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
-            {loadingDrill && <div className="loading-message">Loading new speech...</div>}
-            {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
-            {!loadingDrill && !drillError && currentDrill && <>
-            <div className="prompt-card stagger-in stagger-3">
-              <span className="prompt-tag">
-                <span>{currentDrill.topic}</span>
-                <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
-              </span>
-              "{activePrompt}"
-            </div>
-
-            <div className="poi-input-area stagger-in stagger-4">
-              <div className="input-label">
-                <span>Your POI</span>
-                <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
+            <div className="split-panes">
+              <div className="left-pane">
+                {loadingDrill && <div className="loading-message">Loading new speech...</div>}
+                {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
+                {!loadingDrill && !drillError && currentDrill && (
+                  <div className="prompt-card stagger-in stagger-3">
+                    <span className="prompt-tag">
+                      <span>{currentDrill.topic}</span>
+                      <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
+                    </span>
+                    "{activePrompt}"
+                  </div>
+                )}
               </div>
-              <textarea value={poi} onChange={(e) => setPoi(e.target.value)} placeholder="Type your Point of Information here..." />
-            </div>
 
-            <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
-              {loading ? 'Chair is Grading...' : 'Submit POI'}
-            </button>
-            </>}
+              <div className="right-pane">
+                {!loadingDrill && !drillError && currentDrill && <>
+                  <div className="poi-input-area stagger-in stagger-4">
+                    <div className="input-label">
+                      <span>Your POI</span>
+                      <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
+                    </div>
+                    <textarea value={poi} onChange={(e) => setPoi(e.target.value)} placeholder="Type your Point of Information here..." />
+                  </div>
+
+                  <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
+                    {loading ? 'Chair is Grading...' : 'Submit POI'}
+                  </button>
+                </>}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="feedback-card">
