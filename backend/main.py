@@ -54,8 +54,18 @@ async def random_speech():
     if not text:
         raise HTTPException(status_code=500, detail="Selected speech has no text")
 
-    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
-    return {**speech, "single_claim": first_sentence}
+    sentences = re.split(r"(?<=[.!?]) +", text)
+    claim_keywords = ("propose", "fund", "establish", "resolution", "calls for")
+    single_claim = next(
+        (
+            sentence.strip()
+            for sentence in sentences[2:]
+            if any(keyword in sentence.lower() for keyword in claim_keywords)
+            or re.search(r"\d", sentence)
+        ),
+        next((sentence.strip() for sentence in sentences[2:4] if sentence.strip()), text),
+    )
+    return {**speech, "single_claim": single_claim}
 
 @app.post("/api/grade")
 async def grade_poi(request: POIRequest):

@@ -19,6 +19,8 @@ export default function App() {
   const [currentDrill, setCurrentDrill] = useState(null);
   const [loadingDrill, setLoadingDrill] = useState(true);
   const [drillError, setDrillError] = useState('');
+  const [repCount, setRepCount] = useState(0);
+  const [sessionComplete, setSessionComplete] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' or 'full'
   const [poi, setPoi] = useState('');
   const [loading, setLoading] = useState(false);
@@ -152,6 +154,22 @@ export default function App() {
     setShowFeedback(false);
     setFormExiting(false);
     setPoi('');
+    const nextRepCount = repCount + 1;
+    setRepCount(nextRepCount);
+    if (nextRepCount >= 5) {
+      setSessionComplete(true);
+      return;
+    }
+    fetchRandomDrill();
+  };
+
+  const handleStartSession = () => {
+    setRepCount(0);
+    setSessionComplete(false);
+    setFeedback(null);
+    setShowFeedback(false);
+    setFormExiting(false);
+    setPoi('');
     fetchRandomDrill();
   };
 
@@ -222,22 +240,30 @@ export default function App() {
 
       <div className="paper-container" id="paper-container"></div>
 
-      <div className="app-container">
-        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: loadingDrill ? '35%' : '100%' }}></div></div>
+      <div className={`app-container mode-${mode}`}>
+        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: `${(repCount / 5) * 100}%` }}></div></div>
+        <div className="toggle-container stagger-in stagger-2">
+          <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
+          <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
+            <div className="toggle-knob"></div>
+          </div>
+          <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Single Claim</span>
+        </div>
 
-        {!showFeedback ? (
+        {sessionComplete ? (
+          <div className="session-complete feedback-card">
+            <div className="feedback-score">5/5</div>
+            <div className="feedback-label">Session Complete</div>
+            <p>Great job! You completed 5 reps.</p>
+            <button className="next-btn" onClick={handleStartSession}>
+              Start New Session
+            </button>
+          </div>
+        ) : !showFeedback ? (
           <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
             {loadingDrill && <div className="loading-message">Loading new speech...</div>}
             {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
             {!loadingDrill && !drillError && currentDrill && <>
-            <div className="toggle-container stagger-in stagger-2">
-              <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
-              <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
-                <div className="toggle-knob"></div>
-              </div>
-              <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Single Claim</span>
-            </div>
-
             <div className="prompt-card stagger-in stagger-3">
               <span className="prompt-tag">
                 <span>{currentDrill.topic}</span>
