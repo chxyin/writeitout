@@ -32,6 +32,7 @@ if not DEEPSEEK_API_KEY:
 class POIRequest(BaseModel):
     speech: str
     poi: str
+    is_solutions_only: bool = False
 
 @app.get("/api/random-speech")
 async def random_speech():
@@ -54,17 +55,15 @@ async def random_speech():
     if not text:
         raise HTTPException(status_code=500, detail="Selected speech has no text")
 
-    sentences = re.split(r"(?<=[.!?]) +", text)
-    claim_keywords = ("propose", "fund", "establish", "resolution", "calls for")
-    single_claim = next(
-        (
-            sentence.strip()
-            for sentence in sentences[2:]
-            if any(keyword in sentence.lower() for keyword in claim_keywords)
-            or re.search(r"\d", sentence)
-        ),
-        next((sentence.strip() for sentence in sentences[2:4] if sentence.strip()), text),
-    )
+    pattern = r"(?i)\b(propose|proposes|call for|calls for|establish|establishes|urge|urges|demand|demands|firstly|1\.)\b"
+    match = re.search(pattern, text)
+    if match:
+        single_claim = text[match.start():].strip()
+    else:
+        sentences = re.split(r"(?<=[.!?]) +", text)
+        single_claim = " ".join(sentences[2:5]) if len(sentences) > 3 else text
+
+    single_claim = re.sub(r"(?i)(thank you\.?|let all those.*)", "", single_claim).strip()
     return {**speech, "single_claim": single_claim}
 
 @app.post("/api/grade")
@@ -85,6 +84,7 @@ async def grade_poi(request: POIRequest):
     TASK:
     Rewrite the user's POI so it scores a 9 or 10/10.
     REWRITE RULES: Single question, under 35 words. Simple, blunt HMUN language.
+    If is_solutions_only is True, the user is specifically attacking the solutions proposed in the speech. Grade them on how well they attack the feasibility, funding, or logic of those solutions.
 
     Format as JSON:
     {
@@ -106,7 +106,7 @@ async def grade_poi(request: POIRequest):
         "model": "deepseek-chat",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Speech:\n{request.speech}\n\nPOI:\n{request.poi}"}
+            {"role": "user", "content": f"Speech:\n{request.speech}\n\nPOI:\n{request.poi}\n\nis_solutions_only: {request.is_solutions_only}"}
         ],
         "temperature": 0.1, 
         "response_format": {"type": "json_object"}

@@ -132,7 +132,11 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/grade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speech: activePrompt, poi: poi })
+        body: JSON.stringify({
+          speech: currentDrill.full_speech,
+          poi: poi,
+          is_solutions_only: mode === 'single'
+        })
       });
       const data = await response.json();
       setFeedback(data);
@@ -247,7 +251,7 @@ export default function App() {
           <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
             <div className="toggle-knob"></div>
           </div>
-          <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Single Claim</span>
+          <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
         </div>
 
         {sessionComplete ? (
@@ -283,6 +287,11 @@ export default function App() {
                       <span>Your POI</span>
                       <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
                     </div>
+                    {mode === 'single' && (
+                      <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px' }}>
+                        Your goal is to attack the funding, feasibility, or logic of these proposed solutions.
+                      </p>
+                    )}
                     <textarea value={poi} onChange={(e) => setPoi(e.target.value)} placeholder="Type your Point of Information here..." />
                   </div>
 
