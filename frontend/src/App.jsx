@@ -271,7 +271,7 @@ export default function App() {
                       <span>{currentDrill.topic}</span>
                       <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
                     </span>
-                    "{activePrompt}"
+                    <div className="prompt-scroll">"{activePrompt}"</div>
                   </div>
                 )}
               </div>

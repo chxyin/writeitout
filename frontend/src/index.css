@@ -28,10 +28,18 @@ body.background-plain {
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html,
+body {
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  position: fixed;
+}
+
 body {
   font-family: 'Inter', sans-serif; background-color: var(--bg-color);
   background-image: var(--background-art), linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-  background-size: auto, 20px 20px, 20px 20px; color: var(--text-color); height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; transition: background-color 0.3s ease;
+  background-size: auto, 20px 20px, 20px 20px; color: var(--text-color); display: flex; justify-content: center; align-items: center; transition: background-color 0.3s ease;
 }
 body.background-grid {
   background-image: linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
@@ -125,15 +133,15 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-knob-sm { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
 .toggle-switch-sm.active .toggle-knob-sm { transform: translateX(16px); }
 
-.app-container { position: relative; z-index: 1; width: 100%; max-width: 600px; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; transition: max-width 0.45s var(--ease-out-premium); }
+.app-container { position: relative; z-index: 1; width: 100%; height: 100dvh; max-width: 600px; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; transition: max-width 0.45s var(--ease-out-premium); }
 .app-container.mode-full { max-width: 1200px; }
 .split-panes { display: contents; }
 .left-pane,
 .right-pane { display: contents; }
 .mode-full .split-panes { display: flex; flex-direction: row; gap: 2rem; align-items: stretch; }
-.mode-full .left-pane { display: block; flex: 6; min-width: 0; }
-.mode-full .right-pane { display: flex; flex: 4; min-width: 0; flex-direction: column; gap: 1.5rem; }
-.mode-full .prompt-card { height: 70vh; max-height: 70vh; overflow-y: auto; }
+.mode-full .left-pane { display: flex; flex: 6; min-width: 0; min-height: 0; }
+.mode-full .right-pane { display: flex; flex: 4; min-width: 0; min-height: 0; flex-direction: column; gap: 1.5rem; }
+.mode-full .prompt-card { height: 100%; max-height: 70vh; overflow: hidden; }
 .mode-full .submit-btn { margin-top: 0; }
 .mode-full > .feedback-card { align-self: center; width: 100%; }
 .progress-bar { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; }
@@ -145,7 +153,8 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
 .toggle-switch.active .toggle-knob { transform: translateX(22px); }
 
-.prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: 1.1rem; line-height: 1.5; position: relative; }
+.prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: 1.1rem; line-height: 1.5; position: relative; display: flex; flex-direction: column; min-height: 0; }
+.prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .prompt-tag { position: absolute; top: -12px; left: 20px; background: var(--accent-orange); color: white; font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; letter-spacing: 1px; }
 
 .input-label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
@@ -164,6 +173,8 @@ textarea {
   box-shadow: 0 10px 30px rgba(0,0,0,0.1);
   transition: border-color 0.35s var(--ease-out-premium), box-shadow 0.35s var(--ease-out-premium), transform 0.2s ease;
 }
+textarea,
+input { font-size: 16px; }
 textarea:focus {
   border-color: var(--accent-orange);
   box-shadow: 0 10px 30px rgba(0,0,0,0.1), 0 0 0 4px rgba(255, 149, 0, 0.28), 0 0 24px rgba(255, 149, 0, 0.35), 0 0 48px rgba(255, 149, 0, 0.18);
@@ -284,26 +295,35 @@ textarea:focus {
 
 @media (max-width: 768px) {
   body {
-    min-height: 100dvh;
-    height: auto;
-    overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
     align-items: flex-start;
-    padding: max(1rem, env(safe-area-inset-top)) 0 max(1rem, env(safe-area-inset-bottom));
+    padding: 0;
   }
 
   .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
   .settings-btn { width: 44px; height: 44px; }
   .settings-menu { width: min(260px, calc(100vw - 24px)); right: -4px; }
   .app-container,
-  .app-container.mode-full { max-width: 680px; padding: 3.5rem 1rem 1rem; gap: 1.15rem; }
-  .mode-full .split-panes { display: flex; flex-direction: column; gap: 1.15rem; }
+  .app-container.mode-full { max-width: 680px; padding: max(3.5rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); gap: 1.15rem; }
+  .app-container { padding: max(3.5rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); gap: 1.15rem; }
+  .drill-form { flex: 1; min-height: 0; gap: 1.15rem; }
+  .split-panes,
+  .mode-full .split-panes { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 1.15rem; }
+  .left-pane,
+  .right-pane,
   .mode-full .left-pane,
-  .mode-full .right-pane { display: flex; flex-direction: column; gap: 1.15rem; }
-  .mode-full .prompt-card { height: 42vh; max-height: 42vh; }
-  .drill-form { gap: 1.15rem; }
+  .mode-full .right-pane { display: flex; min-height: 0; flex-direction: column; gap: 1.15rem; }
+  .left-pane,
+  .mode-full .left-pane { flex: 1; }
+  .right-pane,
+  .mode-full .right-pane { flex: 0 0 auto; }
+  .prompt-card,
+  .mode-full .prompt-card { height: auto; max-height: none; flex: 1; }
   .prompt-card { padding: 1.25rem; font-size: 1rem; }
-  textarea { min-height: 120px; height: 28vw; max-height: 180px; padding: 1rem; font-size: 16px; }
+  textarea { min-height: 92px; height: 28vw; max-height: 140px; padding: 1rem; }
+  .poi-input-area,
+  .submit-btn,
+  .next-btn { flex-shrink: 0; }
   .submit-btn, .next-btn { min-height: 52px; padding: 1rem; }
   .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
 }
