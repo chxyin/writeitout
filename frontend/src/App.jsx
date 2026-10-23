@@ -13,6 +13,8 @@ const BACKGROUNDS = [
   { id: 'plain', label: 'Plain' }
 ];
 
+const API_BASE_URL = 'https://YOUR_VERCEL_BACKEND_URL.vercel.app';
+
 export default function App() {
   const [currentDrill, setCurrentDrill] = useState(null);
   const [loadingDrill, setLoadingDrill] = useState(true);
@@ -42,7 +44,7 @@ export default function App() {
     setLoadingDrill(true);
     setDrillError('');
     try {
-      const response = await fetch('http://localhost:8000/api/random-speech');
+      const response = await fetch(`${API_BASE_URL}/api/random-speech`);
       if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
       const data = await response.json();
       setCurrentDrill({
@@ -125,7 +127,7 @@ export default function App() {
     if (!currentDrill || !poi || isOverLimit) return;
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/grade', {
+      const response = await fetch(`${API_BASE_URL}/api/grade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ speech: activePrompt, poi: poi })
