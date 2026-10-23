@@ -1,21 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-
-const DRILLS = [
-  {
-    topic: "Transnational Crime",
-    committee: "UNSC",
-    delegate: "Singapore",
-    full_speech: "Honourable chairs, distinguished delegates, the delegation of Singapore recognizes that criminal syndicates pose a direct threat to state stability... Singapore emphasizes enhancing real-time intelligence sharing between states, supported by closer collaboration with international bodies...",
-    single_claim: "Singapore proposes enhancing real-time intelligence sharing between member states."
-  },
-  {
-    topic: "AI Governance",
-    committee: "DISEC",
-    delegate: "USA",
-    full_speech: "Honourable chairs, the United States believes that unregulated AI poses a catastrophic risk to global security. We propose a binding UN framework to ban lethal autonomous weapons...",
-    single_claim: "The United States proposes a binding UN framework to ban lethal autonomous weapons."
-  }
-];
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const COLOR_THEMES = [
   { id: 'default', label: 'Ocean', color: '#2B5CE6' },
@@ -31,7 +14,9 @@ const BACKGROUNDS = [
 ];
 
 export default function App() {
-  const [drillIndex, setDrillIndex] = useState(0);
+  const [currentDrill, setCurrentDrill] = useState(null);
+  const [loadingDrill, setLoadingDrill] = useState(true);
+  const [drillError, setDrillError] = useState('');
   const [mode, setMode] = useState('single'); // 'single' or 'full'
   const [poi, setPoi] = useState('');
   const [loading, setLoading] = useState(false);
@@ -49,8 +34,35 @@ export default function App() {
   const [lowIntensity, setLowIntensity] = useState(false);
   const exitTimer = useRef(null);
 
-  const currentDrill = DRILLS[drillIndex];
-  const activePrompt = mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech;
+  const activePrompt = currentDrill
+    ? mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech
+    : '';
+
+  const fetchRandomDrill = useCallback(async () => {
+    setLoadingDrill(true);
+    setDrillError('');
+    try {
+      const response = await fetch('http://localhost:8000/api/random-speech');
+      if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
+      const data = await response.json();
+      setCurrentDrill({
+        committee: data.committee,
+        delegate: data.country,
+        topic: data.topic,
+        full_speech: data.text,
+        single_claim: data.single_claim
+      });
+    } catch (error) {
+      setDrillError(error.message);
+    } finally {
+      setLoadingDrill(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadDrill = setTimeout(fetchRandomDrill, 0);
+    return () => clearTimeout(loadDrill);
+  }, [fetchRandomDrill]);
 
   useEffect(() => {
     document.body.className = '';
@@ -66,7 +78,7 @@ export default function App() {
     const container = document.getElementById('paper-container');
     if (!container) return;
     container.innerHTML = '';
-    if (!animOn) return;
+    if (!animOn || lowIntensity) return;
     const isTouch = window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
     const paperCount = lowIntensity ? 3 : (isTouch ? 4 : 9);
     for (let i = 0; i < paperCount; i++) {
@@ -110,7 +122,7 @@ export default function App() {
   const isOverLimit = wordCount > 40;
 
   const handleSubmit = async () => {
-    if (!poi || isOverLimit) return;
+    if (!currentDrill || !poi || isOverLimit) return;
     setLoading(true);
     try {
       const response = await fetch('http://localhost:8000/api/grade', {
@@ -138,7 +150,7 @@ export default function App() {
     setShowFeedback(false);
     setFormExiting(false);
     setPoi('');
-    setDrillIndex((prev) => (prev + 1) % DRILLS.length);
+    fetchRandomDrill();
   };
 
   const getScoreColor = (score) => {
@@ -209,10 +221,13 @@ export default function App() {
       <div className="paper-container" id="paper-container"></div>
 
       <div className="app-container">
-        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: `${((drillIndex + 1) / DRILLS.length) * 100}%` }}></div></div>
+        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: loadingDrill ? '35%' : '100%' }}></div></div>
 
         {!showFeedback ? (
           <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
+            {loadingDrill && <div className="loading-message">Loading new speech...</div>}
+            {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
+            {!loadingDrill && !drillError && currentDrill && <>
             <div className="toggle-container stagger-in stagger-2">
               <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
               <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
@@ -240,6 +255,7 @@ export default function App() {
             <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
               {loading ? 'Chair is Grading...' : 'Submit POI'}
             </button>
+            </>}
           </div>
         ) : (
           <div className="feedback-card">

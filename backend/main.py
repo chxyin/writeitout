@@ -5,6 +5,8 @@ import requests
 import json
 import re
 import os
+import random
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load the .env file
@@ -30,6 +32,30 @@ if not DEEPSEEK_API_KEY:
 class POIRequest(BaseModel):
     speech: str
     poi: str
+
+@app.get("/api/random-speech")
+async def random_speech():
+    speech_file = Path(__file__).resolve().parent.parent / "generated_speeches_batch.json"
+
+    if not speech_file.exists():
+        raise HTTPException(status_code=404, detail=f"Speech dataset not found at {speech_file}")
+
+    try:
+        with speech_file.open("r", encoding="utf-8") as file:
+            speeches = json.load(file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=500, detail=f"Unable to read speech dataset: {error}") from error
+
+    if not isinstance(speeches, list) or not speeches:
+        raise HTTPException(status_code=500, detail="Speech dataset must be a non-empty JSON array")
+
+    speech = random.choice(speeches)
+    text = str(speech.get("text", "")).strip()
+    if not text:
+        raise HTTPException(status_code=500, detail="Selected speech has no text")
+
+    first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
+    return {**speech, "single_claim": first_sentence}
 
 @app.post("/api/grade")
 async def grade_poi(request: POIRequest):
