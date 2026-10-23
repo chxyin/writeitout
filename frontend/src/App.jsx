@@ -13,7 +13,7 @@ const BACKGROUNDS = [
   { id: 'plain', label: 'Plain' }
 ];
 
-const API_BASE_URL = 'https://YOUR_VERCEL_BACKEND_URL.vercel.app';
+const API_BASE_URL = 'https://writeitout-backend.vercel.app';
 
 export default function App() {
   const [currentDrill, setCurrentDrill] = useState(null);
