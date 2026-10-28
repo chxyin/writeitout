@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SettingsMenu from './components/SettingsMenu.jsx';
+import { BACKGROUND_IDS } from './lib/appearance.js';
 import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
 import {
   TOP_OFFSET_RANGE,
@@ -75,7 +76,11 @@ function loadSettings() {
     showComm: Boolean(parsed.showComm ?? DEFAULT_SETTINGS.showComm),
     lowIntensity: Boolean(parsed.lowIntensity ?? DEFAULT_SETTINGS.lowIntensity),
     theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
-    background: typeof parsed.background === 'string' ? parsed.background : DEFAULT_SETTINGS.background,
+    // A background whose swatch has been removed (the old Glow) falls back to the
+    // default instead of leaving <body> with a class nothing in index.css styles.
+    background: BACKGROUND_IDS.includes(parsed.background)
+      ? parsed.background
+      : DEFAULT_SETTINGS.background,
     zoom: clampZoom(parsed.zoom ?? DEFAULT_SETTINGS.zoom),
     topOffset: clampValue(parsed.topOffset, TOP_OFFSET_RANGE),
     bottomOffset: clampValue(parsed.bottomOffset, BOTTOM_OFFSET_RANGE),

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ZOOM_RANGE } from '../lib/zoom.js';
+import { COLOR_THEMES, BACKGROUNDS } from '../lib/appearance.js';
 import {
   TOP_OFFSET_RANGE,
   BOTTOM_OFFSET_RANGE,
@@ -7,19 +8,6 @@ import {
   CARD_WIDTH_RANGE,
   clampValue
 } from '../lib/formatting.js';
-
-const COLOR_THEMES = [
-  { id: 'default', label: 'Ocean', color: '#2B5CE6' },
-  { id: 'midnight', label: 'Midnight', color: '#121212' },
-  { id: 'forest', label: 'Forest', color: '#0B4A31' }
-];
-
-const BACKGROUNDS = [
-  { id: 'grid', label: 'Grid' },
-  { id: 'glow', label: 'Glow' },
-  { id: 'spotlight', label: 'Spotlight' },
-  { id: 'plain', label: 'Plain' }
-];
 
 // The menu is split into two tabs so the formatting controls have room to be
 // legible: General holds everything that changes the look of the page itself
