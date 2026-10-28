@@ -1,6 +1,12 @@
 import { useState } from 'react';
-import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, DEFAULT_ZOOM, clampZoom } from '../lib/zoom.js';
-import { OFFSET_OPTIONS, TEXT_SIZE_OPTIONS, CARD_WIDTH_OPTIONS } from '../lib/formatting.js';
+import { ZOOM_RANGE } from '../lib/zoom.js';
+import {
+  TOP_OFFSET_RANGE,
+  BOTTOM_OFFSET_RANGE,
+  TEXT_SIZE_RANGE,
+  CARD_WIDTH_RANGE,
+  clampValue
+} from '../lib/formatting.js';
 
 const COLOR_THEMES = [
   { id: 'default', label: 'Ocean', color: '#2B5CE6' },
@@ -18,37 +24,69 @@ const BACKGROUNDS = [
 // The menu is split into two tabs so the formatting controls have room to be
 // legible: General holds everything that changes the look of the page itself
 // (theme, background, motion, zoom), Formatting holds the layout preferences
-// that ride on <body> classes.
+// that ride on CSS custom properties.
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'formatting', label: 'Formatting' }
 ];
 
-// Option ids come from lib/formatting.js so the UI and the persisted-settings
-// loader can never drift apart; only the labels live here.
-const labels = (ids, map) => ids.map((id) => ({ id, label: map[id] }));
+// Readouts for the slider rows. Kept at module scope so the components below do
+// not get a fresh function identity on every render.
+const asPercent = (value) => `${Math.round(value * 100)}%`;
+const asVh = (value) => `${value}vh`;
+const asRem = (value) => `${value}rem`;
+const asPx = (value) => `${value}px`;
 
-const OFFSET_CHOICES = labels(OFFSET_OPTIONS, { tight: 'Tight', balanced: 'Balanced', loose: 'Loose' });
-const TEXT_SIZE_CHOICES = labels(TEXT_SIZE_OPTIONS, { s: 'S', m: 'M', l: 'L' });
-const CARD_WIDTH_CHOICES = labels(CARD_WIDTH_OPTIONS, { narrow: 'Narrow', normal: 'Normal', wide: 'Wide' });
+/**
+ * One preference row: a minus / range / plus control with the readout doubling
+ * as a reset to the default. Zoom and every Formatting preference share it, so
+ * the tab looks and behaves exactly like the zoom bar it is modelled on.
+ * `range` carries min / max / step / default, `formatValue` adds the unit.
+ */
+function SliderRow({ label, value, range, formatValue, onChange }) {
+  const stepBy = (direction) => onChange(clampValue(value + direction * range.step, range));
 
-/** A row of mutually exclusive buttons — the same idiom as the background swatches. */
-function SegmentedControl({ label, value, options, onChange }) {
   return (
     <div className="setting-item setting-item-column">
-      <span>{label}</span>
-      <div className="segmented" role="group" aria-label={label}>
-        {options.map((option) => (
-          <button
-            type="button"
-            key={option.id}
-            className={`segmented-option ${value === option.id ? 'active' : ''}`}
-            aria-pressed={value === option.id}
-            onClick={() => onChange(option.id)}
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="setting-item-heading">
+        <span>{label}</span>
+        <button
+          type="button"
+          className="setting-value"
+          onClick={() => onChange(range.default)}
+          disabled={value === range.default}
+          title={`Reset ${label} to ${formatValue(range.default)}`}
+          aria-label={`${label} ${formatValue(value)}, reset to ${formatValue(range.default)}`}
+        >
+          {formatValue(value)}
+        </button>
+      </div>
+      <div className="setting-slider-row">
+        <button
+          type="button"
+          className="setting-step"
+          onClick={() => stepBy(-1)}
+          disabled={value <= range.min}
+          aria-label={`Decrease ${label}`}
+        >−</button>
+        <input
+          className="setting-range"
+          type="range"
+          min={range.min}
+          max={range.max}
+          step={range.step}
+          value={value}
+          onChange={(event) => onChange(clampValue(event.target.value, range))}
+          aria-label={label}
+          aria-valuetext={formatValue(value)}
+        />
+        <button
+          type="button"
+          className="setting-step"
+          onClick={() => stepBy(1)}
+          disabled={value >= range.max}
+          aria-label={`Increase ${label}`}
+        >+</button>
       </div>
     </div>
   );
@@ -71,6 +109,8 @@ export default function SettingsMenu({
   onBackgroundChange,
   zoom,
   onZoomChange,
+  topOffset,
+  onTopOffsetChange,
   bottomOffset,
   onBottomOffsetChange,
   textSize,
@@ -124,44 +164,13 @@ export default function SettingsMenu({
                 <span>Low Intensity</span>
                 <div className={`toggle-switch-sm ${lowIntensity ? 'active' : ''}`} onClick={onLowIntensityToggle}><div className="toggle-knob-sm"></div></div>
               </div>
-              <div className="setting-item setting-item-column">
-                <div className="setting-item-heading">
-                  <span>Zoom</span>
-                  <button
-                    className="zoom-value"
-                    onClick={() => onZoomChange(DEFAULT_ZOOM)}
-                    disabled={zoom === DEFAULT_ZOOM}
-                    title="Reset zoom to 100%"
-                    aria-label={`Zoom ${Math.round(zoom * 100)} percent, reset to 100 percent`}
-                  >
-                    {Math.round(zoom * 100)}%
-                  </button>
-                </div>
-                <div className="zoom-controls">
-                  <button
-                    className="zoom-btn"
-                    onClick={() => onZoomChange(clampZoom(zoom - ZOOM_STEP))}
-                    disabled={zoom <= ZOOM_MIN}
-                    aria-label="Zoom out"
-                  >−</button>
-                  <input
-                    className="zoom-slider"
-                    type="range"
-                    min={ZOOM_MIN}
-                    max={ZOOM_MAX}
-                    step={ZOOM_STEP}
-                    value={zoom}
-                    onChange={(event) => onZoomChange(clampZoom(event.target.value))}
-                    aria-label="Zoom level"
-                  />
-                  <button
-                    className="zoom-btn"
-                    onClick={() => onZoomChange(clampZoom(zoom + ZOOM_STEP))}
-                    disabled={zoom >= ZOOM_MAX}
-                    aria-label="Zoom in"
-                  >+</button>
-                </div>
-              </div>
+              <SliderRow
+                label="Zoom"
+                value={zoom}
+                range={ZOOM_RANGE}
+                formatValue={asPercent}
+                onChange={onZoomChange}
+              />
               <div style={{ height: '1px', background: '#ddd', margin: '4px 0' }}></div>
               <div className="setting-item">
                 <span>Color</span>
@@ -195,27 +204,37 @@ export default function SettingsMenu({
             </>
           ) : (
             <>
-              <SegmentedControl
+              <SliderRow
+                label="Top Offset"
+                value={topOffset}
+                range={TOP_OFFSET_RANGE}
+                formatValue={asVh}
+                onChange={onTopOffsetChange}
+              />
+              <SliderRow
                 label="Bottom Offset"
                 value={bottomOffset}
-                options={OFFSET_CHOICES}
+                range={BOTTOM_OFFSET_RANGE}
+                formatValue={asVh}
                 onChange={onBottomOffsetChange}
               />
-              <SegmentedControl
+              <SliderRow
                 label="Speech Text Size"
                 value={textSize}
-                options={TEXT_SIZE_CHOICES}
+                range={TEXT_SIZE_RANGE}
+                formatValue={asRem}
                 onChange={onTextSizeChange}
               />
-              <SegmentedControl
+              <SliderRow
                 label="Speech Card Width"
                 value={cardWidth}
-                options={CARD_WIDTH_CHOICES}
+                range={CARD_WIDTH_RANGE}
+                formatValue={asPx}
                 onChange={onCardWidthChange}
               />
               <p className="settings-note">
-                Formatting applies to desktop layouts. Phones keep their own full-screen
-                layout.
+                Tap a value to reset it. Formatting applies to desktop layouts — phones keep
+                their own full-screen layout.
               </p>
             </>
           )}

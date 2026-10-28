@@ -50,13 +50,16 @@
      elsewhere divides by it to stay exactly one screen tall. */
   --ui-scale: 1;
 
-  /* Formatting preferences (Settings → Formatting). These are the neutral
-     middle options — "balanced / M / normal" is what the app has always looked
-     like. index.css maps each choice to a body class, and only inside the
-     desktop media query, so tablet and mobile layouts ignore them entirely. */
-  --app-bottom-offset: 10vh;
-  --speech-font-size: 1.1rem;
-  --speech-card-width: 100%;
+  /* Formatting preferences (Settings → Formatting). App.jsx writes the live
+     values onto <body> as --fmt-*, one per slider; the numbers below are the
+     defaults used for the first paint, before React has read localStorage, and
+     must match the range defaults in src/lib/formatting.js. index.css reads them
+     only inside the desktop media query, so the tablet and mobile layouts ignore
+     them no matter what is stored. */
+  --fmt-top-offset: 10vh;
+  --fmt-bottom-offset: 10vh;
+  --fmt-speech-font-size: 1.1rem;
+  --fmt-card-width: 540px;
 }
 
 body.theme-midnight { --bg-color: #121212; --grid-color: rgba(255, 255, 255, 0.03); --card-bg: rgba(255, 255, 255, 0.05); }
@@ -200,24 +203,6 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .settings-tab.active { background: #fff; color: #111; box-shadow: 0 1px 3px rgba(0,0,0,0.16); }
 .settings-tab:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
 
-/* Settings → Formatting: three-way segmented buttons, in the same visual
-   language as the background swatches above. */
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; width: 100%; }
-.segmented-option {
-  border: 1px solid #d6d6d6;
-  border-radius: 8px;
-  padding: 7px 2px;
-  background: #f7f7f7;
-  color: #555;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
-}
-.segmented-option:hover:not(.active) { border-color: #c2c2c2; background: #fff; }
-.segmented-option.active { border-color: var(--accent-orange); background: #fff; color: #111; font-weight: 800; box-shadow: 0 0 0 2px rgba(255, 149, 0, 0.22); }
-.segmented-option:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
 .settings-note { font-size: 10px; font-weight: 600; line-height: 1.45; color: #8A8A8E; }
 
 .toggle-switch-sm { position: relative; width: 36px; height: 20px; background: #ccc; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
@@ -225,9 +210,10 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-knob-sm { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
 .toggle-switch-sm.active .toggle-knob-sm { transform: translateX(16px); }
 
-/* Settings → Zoom: −/slider/+ with the percentage doubling as a reset. */
+/* Settings sliders — Zoom and every Formatting preference share one control:
+   −/range/+ with the readout doubling as a reset to the default. */
 .setting-item-heading { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; }
-.zoom-value {
+.setting-value {
   border: none;
   background: none;
   padding: 2px 4px;
@@ -240,10 +226,10 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
   border-radius: 6px;
   transition: background 0.18s ease, opacity 0.18s ease;
 }
-.zoom-value:hover:not(:disabled) { background: rgba(255, 149, 0, 0.14); }
-.zoom-value:disabled { opacity: 0.55; cursor: default; }
-.zoom-controls { display: flex; align-items: center; gap: 8px; width: 100%; }
-.zoom-btn {
+.setting-value:hover:not(:disabled) { background: rgba(255, 149, 0, 0.14); }
+.setting-value:disabled { opacity: 0.55; cursor: default; }
+.setting-slider-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.setting-step {
   flex: 0 0 auto;
   width: 32px;
   height: 32px;
@@ -261,11 +247,11 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
 }
-.zoom-btn:hover:not(:disabled) { border-color: var(--accent-orange); background: #fff; }
-.zoom-btn:active:not(:disabled) { transform: scale(0.94); }
-.zoom-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.zoom-slider { flex: 1 1 auto; min-width: 0; height: 20px; margin: 0; padding: 0; accent-color: var(--accent-orange); cursor: pointer; background: transparent; border: none; border-radius: 0; box-shadow: none; }
-.zoom-slider:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; }
+.setting-step:hover:not(:disabled) { border-color: var(--accent-orange); background: #fff; }
+.setting-step:active:not(:disabled) { transform: scale(0.94); }
+.setting-step:disabled { opacity: 0.4; cursor: not-allowed; }
+.setting-range { flex: 1 1 auto; min-width: 0; height: 20px; margin: 0; padding: 0; accent-color: var(--accent-orange); cursor: pointer; background: transparent; border: none; border-radius: 0; box-shadow: none; }
+.setting-range:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; }
 
 .app-container {
   position: relative;
@@ -622,19 +608,18 @@ textarea:focus {
    overrides tokens; the layout rules above consume them.
    ============================================================ */
 
-/* ---------- Desktop: a bottom-anchored slab with a pinned composer ----------
-   The shell fills the screen minus Settings → Formatting → Bottom Offset, and
-   the top margin absorbs whatever is left, so by default (10vh) it sits centred
-   with equal 10vh margins above and below. Inside, the column is: chrome
-   (progress + toggle, fixed), the speech card (absorbs whatever is left) and the
-   composer band (textarea + Submit, 22vh). That keeps Submit in the same spot on
-   every rep, however long the speech is. Heights are divided by --ui-scale
-   because viewport units are not zoom-aware. */
+/* ---------- Desktop: a floating slab, sized by the Formatting sliders --------
+   The shell fills the screen minus the top and bottom offsets, so by default
+   (10vh each) it sits exactly where the old centred 80vh slab did. Inside, the
+   column is: chrome (progress + toggle, fixed), the speech card (absorbs
+   whatever is left) and the composer band (textarea + Submit, 22vh). That keeps
+   Submit in the same spot on every rep, however long the speech is. Heights are
+   divided by --ui-scale because viewport units are not zoom-aware. */
 @media (min-width: 1025px) {
   /* 1025px is the desktop edge in src/hooks/useBreakpoint.js. The shell height
      lives in a media query rather than on [data-tier] so it is already right on
      the first paint, before the hook has mirrored data-tier onto <body> — no
-     jump from full height to 80vh. */
+     jump from full height to the slab. */
   body {
     /* At zoom > 100% a width: 100% shell renders wider than the viewport, which
        is what puts a phantom horizontal scrollbar along the bottom. Clip it
@@ -642,19 +627,27 @@ textarea:focus {
     overflow-x: hidden;
   }
   .app-container {
-    /* Vertical placement is driven by Settings → Formatting → Bottom Offset.
-       The 80vh slab used to be centred by <body>; now the top margin takes
-       whatever the bottom offset does not, so the interface parks exactly
-       --app-bottom-offset above the bottom edge (10vh, the default, reproduces
-       the old centred look pixel for pixel). The height is what is left over,
-       which keeps the three numbers adding up to one screen — no page scroll.
-       Viewport units are not zoom-aware, so they are divided by --ui-scale;
-       the rem floor is not, because the shell is zoomed and so is the settings
-       button it is protecting. */
-    --shell-top: max(
-      calc((20vh - var(--app-bottom-offset)) / var(--ui-scale)),
-      4.25rem
-    );
+    /* ---- Settings → Formatting ----
+       App.jsx writes --fmt-* onto <body> from the four sliders; this block is
+       the only place they are read, which is what keeps the tablet split and the
+       locked mobile shell untouched by these preferences. */
+    --app-top-offset: var(--fmt-top-offset);
+    --app-bottom-offset: var(--fmt-bottom-offset);
+    --speech-font-size: var(--fmt-speech-font-size);
+    --speech-card-width: var(--fmt-card-width);
+    /* The card width slider has to move the shell with it: Submit and the
+       progress bar are as wide as the shell, so a card floating in a wider
+       column would leave them sticking out past it, and a card wider than the
+       column would simply overflow. The shell is therefore the card plus its two
+       gutters, which is what the old fixed 600px column already was
+       (540 + 2 × 2rem). The two-pane shell grows by a further 600px — the prompt
+       pane plus the POI pane — so the slider is not a no-op in full mode. */
+    --layout-max-single: calc(var(--speech-card-width) + 2 * var(--layout-gutter-x));
+    --layout-max-full: calc(var(--layout-max-single) + 600px);
+    /* Margins are the offsets and the height is whatever is left, so the three
+       numbers always add up to one screen and the page never scrolls. Viewport
+       units are not zoom-aware, so they are divided by --ui-scale. */
+    --shell-top: calc(var(--app-top-offset) / var(--ui-scale));
     --shell-bottom: calc(var(--app-bottom-offset) / var(--ui-scale));
     height: calc(100vh / var(--ui-scale) - var(--shell-top) - var(--shell-bottom));
     min-height: 0;
@@ -669,27 +662,6 @@ textarea:focus {
        same distance apart as the bands inside the composer. */
     gap: var(--layout-gap);
   }
-
-  /* ---- Settings → Formatting ----
-     Every rule for these preferences lives in this block on purpose: the tablet
-     tier splits the screen into two panes and phones are locked to 100dvh at
-     full width, so a wider card or a bigger speech font would fight those
-     layouts. The body classes are harmless elsewhere — they only carry values
-     that nothing outside this block reads. */
-  body.offset-tight { --app-bottom-offset: 2vh; }
-  body.offset-balanced { --app-bottom-offset: 10vh; }
-  body.offset-loose { --app-bottom-offset: 20vh; }
-  body.text-s { --speech-font-size: 0.95rem; }
-  body.text-m { --speech-font-size: 1.1rem; }
-  body.text-l { --speech-font-size: 1.3rem; }
-  /* Narrow and wide resize the shell as well: an 800px card cannot fit in the
-     600px single column, and a 500px card floating in a 600px column would leave
-     Submit and the progress bar wider than the card. 564 = 500 card + the two
-     2rem gutters, 864 = 800 card + the same gutters. The two-pane shell scales
-     with it so the setting is not a no-op in full mode. */
-  body.width-narrow { --speech-card-width: 500px; --layout-max-single: 564px; --layout-max-full: 960px; }
-  body.width-normal { --speech-card-width: 100%; }
-  body.width-wide { --speech-card-width: 800px; --layout-max-single: 864px; --layout-max-full: 1320px; }
 
   .app-container .prompt-card { font-size: var(--speech-font-size); }
   /* Only the single-column view has one card with slack around it; in full mode

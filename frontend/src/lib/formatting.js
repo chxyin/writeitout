@@ -1,32 +1,51 @@
 // Formatting preferences shared by the Settings → Formatting tab and the
-// persisted-settings loader. Each option maps to a class on <body> (see
-// formattingClasses below), and every one of those classes is defined in
-// index.css inside the desktop media query — the values here and there must
-// stay in sync.
+// persisted-settings loader.
+//
+// Unlike the theme or the background these are free-running numbers steered by
+// sliders (the same control as Zoom), so there is no fixed list of legal values
+// — the ranges below are the contract. Every read goes through clampValue, so a
+// stale localStorage entry, a hand-edited blob or a loose string from an
+// <input type="range"> can only ever produce a usable number.
+//
+// The values reach CSS as custom properties (see formattingVars) that index.css
+// reads only inside its desktop media query.
 
-export const OFFSET_OPTIONS = ['tight', 'balanced', 'loose'];
-export const DEFAULT_BOTTOM_OFFSET = 'balanced';
-
-export const TEXT_SIZE_OPTIONS = ['s', 'm', 'l'];
-export const DEFAULT_TEXT_SIZE = 'm';
-
-export const CARD_WIDTH_OPTIONS = ['narrow', 'normal', 'wide'];
-export const DEFAULT_CARD_WIDTH = 'normal';
+/** How far the interface sits from the top edge, in vh. */
+export const TOP_OFFSET_RANGE = { min: 0, max: 20, step: 1, default: 10 };
+/** How far the interface sits from the bottom edge, in vh. */
+export const BOTTOM_OFFSET_RANGE = { min: 0, max: 20, step: 1, default: 10 };
+/** Speech card type size, in rem. */
+export const TEXT_SIZE_RANGE = { min: 0.85, max: 1.6, step: 0.05, default: 1.1 };
+/** Speech card width, in px. The shell grows around it by the two 2rem gutters. */
+export const CARD_WIDTH_RANGE = { min: 360, max: 960, step: 20, default: 540 };
 
 /**
- * Keeps a persisted value only if it is one of the known options. Anything else
- * (a stale entry, a hand-edited localStorage blob) falls back to the default
- * instead of putting an unknown class on <body>.
+ * Snaps a persisted or dragged value onto the slider's grid and keeps it inside
+ * the range. Anything that is not a finite number — a stale entry, a missing
+ * field, a hand-edited blob — falls back to the default instead of poisoning
+ * the stylesheet.
  */
-export function pickOption(value, options, fallback) {
-  return options.includes(value) ? value : fallback;
+export function clampValue(value, range) {
+  if (value === undefined || value === null || value === '') return range.default;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return range.default;
+  const snapped = Math.round((numeric - range.min) / range.step) * range.step + range.min;
+  const clamped = Math.min(range.max, Math.max(range.min, snapped));
+  // Grid arithmetic drifts (0.8500000000000001), so trim to the step's decimals.
+  const decimals = (String(range.step).split('.')[1] || '').length;
+  return Number(clamped.toFixed(decimals));
 }
 
 /**
- * The three classes that carry the formatting preferences into CSS. All three
- * are always returned — including the neutral ones — so the stylesheet states
- * every state explicitly instead of relying on the absence of a class.
+ * The four custom properties App.jsx writes onto <body>. They are read only by
+ * the desktop media query in index.css, so phones and tablets keep their own
+ * layouts no matter what is stored here.
  */
-export function formattingClasses({ bottomOffset, textSize, cardWidth }) {
-  return [`offset-${bottomOffset}`, `text-${textSize}`, `width-${cardWidth}`];
+export function formattingVars({ topOffset, bottomOffset, textSize, cardWidth }) {
+  return {
+    '--fmt-top-offset': `${topOffset}vh`,
+    '--fmt-bottom-offset': `${bottomOffset}vh`,
+    '--fmt-speech-font-size': `${textSize}rem`,
+    '--fmt-card-width': `${cardWidth}px`
+  };
 }

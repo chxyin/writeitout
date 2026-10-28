@@ -2,14 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import SettingsMenu from './components/SettingsMenu.jsx';
 import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
 import {
-  OFFSET_OPTIONS,
-  DEFAULT_BOTTOM_OFFSET,
-  TEXT_SIZE_OPTIONS,
-  DEFAULT_TEXT_SIZE,
-  CARD_WIDTH_OPTIONS,
-  DEFAULT_CARD_WIDTH,
-  pickOption,
-  formattingClasses
+  TOP_OFFSET_RANGE,
+  BOTTOM_OFFSET_RANGE,
+  TEXT_SIZE_RANGE,
+  CARD_WIDTH_RANGE,
+  clampValue,
+  formattingVars
 } from './lib/formatting.js';
 import PaperBackground from './components/PaperBackground.jsx';
 import DrillForm from './components/DrillForm.jsx';
@@ -49,11 +47,12 @@ const DEFAULT_SETTINGS = {
   theme: 'default',
   background: 'grid',
   zoom: DEFAULT_ZOOM,
-  // Settings → Formatting. "balanced / m / normal" is what the app has always
-  // looked like, so the defaults never change the initial layout.
-  bottomOffset: DEFAULT_BOTTOM_OFFSET,
-  textSize: DEFAULT_TEXT_SIZE,
-  cardWidth: DEFAULT_CARD_WIDTH
+  // Settings → Formatting. Each default is the value the app has always had, so
+  // untouched preferences leave the layout exactly as it was.
+  topOffset: TOP_OFFSET_RANGE.default,
+  bottomOffset: BOTTOM_OFFSET_RANGE.default,
+  textSize: TEXT_SIZE_RANGE.default,
+  cardWidth: CARD_WIDTH_RANGE.default
 };
 
 /**
@@ -78,9 +77,10 @@ function loadSettings() {
     theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
     background: typeof parsed.background === 'string' ? parsed.background : DEFAULT_SETTINGS.background,
     zoom: clampZoom(parsed.zoom ?? DEFAULT_SETTINGS.zoom),
-    bottomOffset: pickOption(parsed.bottomOffset, OFFSET_OPTIONS, DEFAULT_BOTTOM_OFFSET),
-    textSize: pickOption(parsed.textSize, TEXT_SIZE_OPTIONS, DEFAULT_TEXT_SIZE),
-    cardWidth: pickOption(parsed.cardWidth, CARD_WIDTH_OPTIONS, DEFAULT_CARD_WIDTH)
+    topOffset: clampValue(parsed.topOffset, TOP_OFFSET_RANGE),
+    bottomOffset: clampValue(parsed.bottomOffset, BOTTOM_OFFSET_RANGE),
+    textSize: clampValue(parsed.textSize, TEXT_SIZE_RANGE),
+    cardWidth: clampValue(parsed.cardWidth, CARD_WIDTH_RANGE)
   };
 }
 
@@ -119,8 +119,9 @@ export default function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
   const { animOn, showTopic, showComm, theme, background, lowIntensity, zoom } = settings;
-  // Settings → Formatting: spacing and type, carried to CSS as body classes.
-  const { bottomOffset, textSize, cardWidth } = settings;
+  // Settings → Formatting: four free-running layout numbers, carried to CSS as
+  // the --fmt-* custom properties below.
+  const { topOffset, bottomOffset, textSize, cardWidth } = settings;
   const exitTimer = useRef(null);
 
   const updateSetting = useCallback((key, value) => {
@@ -205,13 +206,7 @@ export default function App() {
     if (!showComm) document.body.classList.add('hide-comm');
     document.body.classList.add(`background-${background}`);
     if (lowIntensity) document.body.classList.add('low-intensity');
-    // The line above wipes every class on <body>, so the formatting classes have
-    // to be re-applied here rather than in an effect of their own — otherwise
-    // changing the theme would silently drop the spacing preferences.
-    formattingClasses({ bottomOffset, textSize, cardWidth }).forEach((name) =>
-      document.body.classList.add(name)
-    );
-  }, [theme, background, lowIntensity, animOn, showTopic, showComm, bottomOffset, textSize, cardWidth]);
+  }, [theme, background, lowIntensity, animOn, showTopic, showComm]);
 
   useEffect(() => {
     persistSettings(settings);
@@ -223,6 +218,17 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--ui-scale', String(zoom));
   }, [zoom]);
+
+  // Settings → Formatting rides on custom properties rather than body classes:
+  // the values are numbers now, not a fixed set of choices. index.css reads them
+  // only inside its desktop media query, and a style property survives the
+  // className reset above, so this can stay an effect of its own.
+  useEffect(() => {
+    const vars = formattingVars({ topOffset, bottomOffset, textSize, cardWidth });
+    Object.entries(vars).forEach(([name, value]) => {
+      document.body.style.setProperty(name, value);
+    });
+  }, [topOffset, bottomOffset, textSize, cardWidth]);
 
   // Mirror the tier onto <body> so page-level rules (settings button, papers)
   // follow the same breakpoints as the app shell. data-* survives the
@@ -390,6 +396,8 @@ export default function App() {
         onBackgroundChange={(value) => updateSetting('background', value)}
         zoom={zoom}
         onZoomChange={(value) => updateSetting('zoom', value)}
+        topOffset={topOffset}
+        onTopOffsetChange={(value) => updateSetting('topOffset', value)}
         bottomOffset={bottomOffset}
         onBottomOffsetChange={(value) => updateSetting('bottomOffset', value)}
         textSize={textSize}
