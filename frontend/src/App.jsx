@@ -26,6 +26,11 @@ function describeApiError(data, status) {
 
 const SETTINGS_STORAGE_KEY = 'writeitout:settings';
 
+/** One rep in the history timeline. `feedback` stays null until it is graded. */
+function createRep(drill) {
+  return { drill, poi: '', feedback: null };
+}
+
 const DEFAULT_SETTINGS = {
   animOn: true,
   showTopic: true,
@@ -70,15 +75,18 @@ function persistSettings(settings) {
 }
 
 export default function App() {
-  const [currentDrill, setCurrentDrill] = useState(null);
+  // Dr. Frost Maths-style rep history. Every rep the user has seen is one
+  // { drill, poi, feedback } entry and the rep on screen is history[currentIndex]
+  // (feedback stays null until the chair grades it). < Prev / Next > only move
+  // the index and replay a saved entry — they never call the API.
+  const [history, setHistory] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [loadingDrill, setLoadingDrill] = useState(true);
   const [drillError, setDrillError] = useState('');
-  const [repCount, setRepCount] = useState(0);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' or 'full'
   const [poi, setPoi] = useState('');
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState(null);
   const [formExiting, setFormExiting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -104,35 +112,70 @@ export default function App() {
   const { isMobile, isTablet, orientation } = useBreakpoint();
   const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
 
+  // The rep on screen is read straight out of the history, so the drill view and
+  // the feedback view can never disagree about which rep is being looked at.
+  const currentEntry = history[currentIndex] || null;
+  const currentDrill = currentEntry ? currentEntry.drill : null;
+  const feedback = currentEntry ? currentEntry.feedback : null;
+  // One rep per graded entry, so re-grading an old rep cannot inflate progress.
+  const gradedCount = history.reduce(
+    (total, entry) => total + (entry.feedback ? 1 : 0),
+    0
+  );
+
   const activePrompt = currentDrill
     ? mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech
     : '';
 
-  const fetchRandomDrill = useCallback(async () => {
+  // Fetches one drill. Kept free of state writes so the caller decides whether
+  // the result becomes a fresh rep or replaces a skipped one.
+  const requestDrill = useCallback(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/random-speech`);
+    if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
+    const data = await response.json();
+    return {
+      committee: data.committee,
+      delegate: data.country,
+      topic: data.topic,
+      full_speech: data.text,
+      single_claim: data.single_claim
+    };
+  }, []);
+
+  const loadFirstRep = useCallback(async () => {
     setLoadingDrill(true);
     setDrillError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/random-speech`);
-      if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
-      const data = await response.json();
-      setCurrentDrill({
-        committee: data.committee,
-        delegate: data.country,
-        topic: data.topic,
-        full_speech: data.text,
-        single_claim: data.single_claim
-      });
+      const drill = await requestDrill();
+      setHistory([createRep(drill)]);
+      setCurrentIndex(0);
+      setPoi('');
     } catch (error) {
       setDrillError(error.message);
     } finally {
       setLoadingDrill(false);
     }
-  }, []);
+  }, [requestDrill]);
 
   useEffect(() => {
-    const loadDrill = setTimeout(fetchRandomDrill, 0);
+    const loadDrill = setTimeout(loadFirstRep, 0);
     return () => clearTimeout(loadDrill);
-  }, [fetchRandomDrill]);
+  }, [loadFirstRep]);
+
+  // < Prev / Next > and ← Back share this: load a saved rep, no API call. The
+  // entry's own POI is pushed back into the textarea so an old answer can still
+  // be read (and re-edited) after navigating away.
+  const goToEntry = useCallback((index) => {
+    const entry = history[index];
+    if (!entry) return;
+    setCurrentIndex(index);
+    setPoi(entry.poi);
+    setShowFeedback(Boolean(entry.feedback));
+    setSubmitError('');
+    setDrillError('');
+    setFormExiting(false);
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+  }, [history]);
 
   useEffect(() => {
     document.body.className = '';
@@ -173,7 +216,42 @@ export default function App() {
     };
   }, []);
 
+  // Fetches the next drill and makes it the rep on screen. A rep that was never
+  // answered (skipped with Next >) is overwritten rather than appended, so the
+  // timeline only keeps reps the user actually saw.
+  const startNewRep = useCallback(async () => {
+    if (loadingDrill) return;
+    setLoadingDrill(true);
+    setDrillError('');
+    setSubmitError('');
+    setShowFeedback(false);
+    setFormExiting(false);
+    try {
+      const entry = createRep(await requestDrill());
+      if (currentEntry && !currentEntry.feedback) {
+        setHistory((entries) =>
+          entries.map((item, index) => (index === currentIndex ? entry : item))
+        );
+      } else {
+        setHistory((entries) => [...entries, entry]);
+        setCurrentIndex(history.length);
+      }
+      setPoi('');
+    } catch (error) {
+      setDrillError(error.message);
+    } finally {
+      setLoadingDrill(false);
+    }
+  }, [currentEntry, currentIndex, history.length, loadingDrill, requestDrill]);
+
   const wordCount = poi.trim() ? poi.trim().split(/\s+/).length : 0;
+
+  // ▸ Navigation guards. Prev needs somewhere to go; Next is only blocked at the
+  // end of the timeline when a draft would be thrown away (Submit is right there).
+  const canPrev = currentIndex > 0 && !loading;
+  const atEndOfHistory = currentIndex >= history.length - 1;
+  const hasUnsavedDraft = !feedback && poi.trim().length > 0;
+  const canNext = !loading && !loadingDrill && !(atEndOfHistory && hasUnsavedDraft);
 
   const handleSubmit = async () => {
     if (!currentDrill || !poi || loading) return;
@@ -198,7 +276,14 @@ export default function App() {
         throw new Error('The chair returned an unexpected response. Please try again.');
       }
 
-      setFeedback(data);
+      // The pending rep already occupies history[currentIndex] (it was seeded
+      // when the drill arrived), so grading fills that slot instead of appending
+      // a duplicate — history never holds two versions of the same rep.
+      setHistory((entries) =>
+        entries.map((entry, index) =>
+          index === currentIndex ? { drill: currentDrill, poi, feedback: data } : entry
+        )
+      );
       setFormExiting(true);
       if (exitTimer.current) clearTimeout(exitTimer.current);
       exitTimer.current = setTimeout(() => {
@@ -212,38 +297,41 @@ export default function App() {
     }
   };
 
-  const handleNextRep = () => {
-    setFeedback(null);
-    setShowFeedback(false);
-    setFormExiting(false);
-    setPoi('');
-    setSubmitError('');
-    const nextRepCount = repCount + 1;
-    setRepCount(nextRepCount);
-    if (nextRepCount >= sessionLength) {
+  // Next > : walk forward through saved reps, and only fetch a new drill once the
+  // user is standing on the last one (Dr. Frost's "end of the timeline").
+  const handleNext = () => {
+    if (currentIndex < history.length - 1) {
+      goToEntry(currentIndex + 1);
+      return;
+    }
+    if (gradedCount >= sessionLength) {
       setSessionComplete(true);
       return;
     }
-    fetchRandomDrill();
+    startNewRep();
   };
 
+  const handlePrev = () => {
+    if (currentIndex === 0) return;
+    goToEntry(currentIndex - 1);
+  };
+
+  // ← Back leaves the card for the drill of the same rep, POI included, so an
+  // answer can be re-read and re-graded in place.
   const handleBackToEdit = () => {
     if (exitTimer.current) clearTimeout(exitTimer.current);
-    setFeedback(null);
     setShowFeedback(false);
     setFormExiting(false);
     setSubmitError('');
   };
 
   const handleStartSession = () => {
-    setRepCount(0);
+    if (exitTimer.current) clearTimeout(exitTimer.current);
     setSessionComplete(false);
-    setFeedback(null);
     setShowFeedback(false);
     setFormExiting(false);
-    setPoi('');
     setSubmitError('');
-    fetchRandomDrill();
+    loadFirstRep();
   };
 
   const handlePoiChange = (value) => {
@@ -285,35 +373,38 @@ export default function App() {
         data-tier={tier}
         data-orientation={orientation}
       >
-        <div className="progress-bar stagger-in stagger-1">
-          <div
-            className="progress-segments"
-            role="progressbar"
-            aria-label="Session progress"
-            aria-valuemin={0}
-            aria-valuemax={sessionLength}
-            aria-valuenow={repCount}
-          >
-            {Array.from({ length: sessionLength }, (_, index) => (
-              <span
-                key={index}
-                className={`progress-segment ${index < repCount ? 'filled' : ''}`}
-              />
-            ))}
+        {/* Top band: progress + mode toggle, never shrinks and never scrolls. */}
+        <div className="app-top">
+          <div className="progress-bar stagger-in stagger-1">
+            <div
+              className="progress-segments"
+              role="progressbar"
+              aria-label="Session progress"
+              aria-valuemin={0}
+              aria-valuemax={sessionLength}
+              aria-valuenow={gradedCount}
+            >
+              {Array.from({ length: sessionLength }, (_, index) => (
+                <span
+                  key={index}
+                  className={`progress-segment ${index < gradedCount ? 'filled' : ''}`}
+                />
+              ))}
+            </div>
+            <span className="progress-counter">{Math.min(currentIndex + 1, sessionLength)} / {sessionLength}</span>
           </div>
-          <span className="progress-counter">{Math.min(repCount + 1, sessionLength)} / {sessionLength}</span>
-        </div>
-        <div className="toggle-container stagger-in stagger-2">
-          <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
-          <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
-            <div className="toggle-knob"></div>
+          <div className="toggle-container stagger-in stagger-2">
+            <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
+            <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
+              <div className="toggle-knob"></div>
+            </div>
+            <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
           </div>
-          <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
         </div>
 
         {sessionComplete ? (
           <SessionComplete onStart={handleStartSession} total={sessionLength} />
-        ) : !showFeedback ? (
+        ) : !showFeedback || !feedback ? (
           <DrillForm
             formExiting={formExiting}
             loadingDrill={loadingDrill}
@@ -326,14 +417,28 @@ export default function App() {
             loading={loading}
             onPoiChange={handlePoiChange}
             onSubmit={handleSubmit}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            canPrev={canPrev}
+            canNext={canNext}
+            historyIndex={currentIndex}
+            historyLength={history.length}
           />
         ) : (
+          // Keyed by rep so the copied/expanded state never leaks between reps.
           <FeedbackCard
+            key={`rep-${currentIndex}`}
             feedback={feedback}
             scoreColor={getScoreColor(feedback.score)}
             originalPoi={poi}
-            onNext={handleNextRep}
+            onNext={handleNext}
             onBack={handleBackToEdit}
+            onPrev={handlePrev}
+            canPrev={canPrev}
+            canNext={canNext}
+            historyIndex={currentIndex}
+            historyLength={history.length}
+            initialShowOriginal={currentIndex < history.length - 1}
           />
         )}
       </div>

@@ -1,3 +1,5 @@
+import HistoryNav from './HistoryNav.jsx';
+
 export default function DrillForm({
   formExiting,
   loadingDrill,
@@ -9,7 +11,14 @@ export default function DrillForm({
   submitError,
   loading,
   onPoiChange,
-  onSubmit
+  onSubmit,
+  // History navigation, shared with the feedback view.
+  onPrev,
+  onNext,
+  canPrev,
+  canNext,
+  historyIndex = 0,
+  historyLength = 1
 }) {
   // Colour cues only: there is no hard limit, but a delegate should see when a
   // POI is getting long enough that a chair may cut them off.
@@ -28,7 +37,7 @@ export default function DrillForm({
   return (
     <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
       <div className="split-panes">
-        <div className="left-pane">
+        <div className="left-pane app-middle">
           {loadingDrill && <div className="loading-message">Loading new speech...</div>}
           {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
           {!loadingDrill && !drillError && currentDrill && (
@@ -42,7 +51,7 @@ export default function DrillForm({
           )}
         </div>
 
-        <div className="right-pane">
+        <div className="right-pane app-bottom">
           {!loadingDrill && !drillError && currentDrill && <>
             <div className="poi-input-area stagger-in stagger-4">
               <div className="input-label">
@@ -57,6 +66,19 @@ export default function DrillForm({
                 title="Ctrl/Cmd + Enter to submit"
               />
             </div>
+
+            {/* History navigation sits between the field and Submit so the
+                Submit button keeps its pinned position at the bottom edge. */}
+            {historyLength > 1 && (
+              <HistoryNav
+                index={historyIndex}
+                total={historyLength}
+                onPrev={onPrev}
+                onNext={onNext}
+                canPrev={canPrev}
+                canNext={canNext}
+              />
+            )}
 
             {submitError && (
               <div className="submit-error" role="alert">{submitError}</div>

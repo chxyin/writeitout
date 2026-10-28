@@ -236,6 +236,20 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 }
 .app-container.mode-full { max-width: var(--layout-max-full); }
 
+/* ---------- The unified three-band frame ----------
+   Top: progress + mode toggle. Middle: the speech card (drill) or the white
+   feedback card. Bottom: the composer, or Back/Next. Only the middle band
+   scrolls; the tiles are pinned by flex-shrink: 0 so they never drift.
+   Desktop pins the bands in the tier block below — tablet and mobile keep
+   their own flow, so these wrappers are visually inert for them. */
+.app-top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
 /* Desktop flow: single mode runs as one column, full mode splits into panes. */
 .split-panes { display: contents; }
 .left-pane,
@@ -496,9 +510,55 @@ textarea:focus {
    top margin so the pair lines up with the single-column Session Complete. */
 .feedback-actions .next-btn { flex: 1 1 auto; margin-top: 0; }
 
+/* Prev / Next rep navigation. It sits on the blue shell in the drill view and
+   inside the white card in the feedback view, so the pill flips colour with its
+   context; both variants are deliberately quieter than Submit / Next Rep. */
+.history-nav {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.history-btn {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, opacity 0.18s ease, transform 0.18s var(--ease-out-premium);
+}
+.history-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.26); }
+.history-btn:active:not(:disabled) { transform: scale(0.96); }
+.history-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.history-position {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.78);
+}
+.feedback-card .history-btn {
+  border-color: rgba(43, 92, 230, 0.28);
+  background: #EEF2FF;
+  color: var(--bg-color);
+}
+.feedback-card .history-btn:hover:not(:disabled) { background: #fff; }
+.feedback-card .history-position { color: #8A8A8E; }
+
 @media (prefers-reduced-motion: reduce) {
   .stagger-in,
   .drill-form.is-exiting,
+  /* Desktop promotes the bands, so the fade-out runs on them instead. */
+  .drill-form.is-exiting .left-pane,
+  .drill-form.is-exiting .right-pane,
   .feedback-card,
   .settings-menu,
   .paper {
@@ -539,55 +599,50 @@ textarea:focus {
     /* Hard ceiling: nothing inside may stretch the shell past 80vh. Long content
        scrolls in its own pane below rather than growing the page. */
     overflow: hidden;
+    /* The shell's gap is what separates the three bands (--layout-gap is 1.5rem
+       on desktop, 1.25rem on tablet, 1rem on mobile), so every band sits the
+       same distance apart as the bands inside the composer. */
+    gap: var(--layout-gap);
   }
 }
 
 /* Everything below is scoped to the desktop tier, so the tablet and mobile
    blocks further down keep their own layouts untouched. */
+
+/* ---- Band 1: progress + mode toggle. Pinned, never scrolls. ---- */
+.app-container[data-tier="desktop"] > .app-top { flex: 0 0 auto; }
 .app-container[data-tier="desktop"] .progress-bar,
 .app-container[data-tier="desktop"] .toggle-container {
   /* Chrome of the shell never shrinks. */
   flex-shrink: 0;
 }
 
-/* Feedback and Session Complete scroll inside the shell instead of pushing it. */
-.app-container[data-tier="desktop"] > .feedback-card {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.app-container[data-tier="desktop"] .drill-form {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* Full mode already splits into two panes; it only needs to fill the column. */
-.app-container[data-tier="desktop"].mode-full .split-panes {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-/* Single mode used to flatten the panes into the shell column with
-   `display: contents`, which left the textarea and the Submit button as loose
-   siblings with no box to size. They become real boxes here — same visual
-   order and gap as before — so the maths below has something to measure. */
+/* ---- Drill view, single mode ---- */
+/* Promoting the bands with `display: contents` makes the frame a literal
+   three-child column — .app-top, .left-pane (speech) and .right-pane
+   (composer) — so the shell's own 1.5rem gap spaces all three bands and the
+   bands keep real boxes to size. */
+.app-container[data-tier="desktop"].mode-single > .drill-form,
 .app-container[data-tier="desktop"].mode-single .split-panes {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: var(--layout-gap);
-  min-height: 0;
+  display: contents;
 }
+/* The Submit fade-out moves onto the bands: a `display: contents` element has no
+   box of its own to animate. pointer-events still inherits from .drill-form. */
+.app-container[data-tier="desktop"].mode-single .drill-form.is-exiting .left-pane,
+.app-container[data-tier="desktop"].mode-single .drill-form.is-exiting .right-pane {
+  animation: formFadeOut 0.32s ease forwards;
+}
+
+/* Band 2: the speech card. Takes every pixel the composer does not need. */
 .app-container[data-tier="desktop"].mode-single .left-pane {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
-/* The speech text takes all the space the composer does not need. The scroll
-   stays on .prompt-scroll: the topic badge hangs 12px above the card, so the
-   card itself must not clip its overflow. */
+/* The scroll stays on .prompt-scroll: the topic badge hangs 12px above the
+   card, so the card itself must not clip its overflow. */
 .app-container[data-tier="desktop"].mode-single .prompt-card {
   flex: 1 1 auto;
   min-height: 0;
@@ -596,10 +651,10 @@ textarea:focus {
   flex: 1 1 auto;
 }
 
-/* The composer: textarea + Submit in a 22vh band. min-height rather than a
-   fixed height so a validation message grows the band (the speech card gives
-   up the room) instead of being clipped, and flex-shrink: 0 keeps the band
-   from ever being squeezed by the speech above it. */
+/* Band 3: the composer — textarea + navigation + Submit in a 22vh band.
+   min-height rather than a fixed height so a validation message grows the band
+   (the speech card gives up the room) instead of being clipped, and
+   flex-shrink: 0 keeps Submit pinned to the same spot on every rep. */
 .app-container[data-tier="desktop"].mode-single .right-pane {
   display: flex;
   flex: 0 0 auto;
@@ -622,11 +677,50 @@ textarea:focus {
   min-height: 64px;
 }
 .app-container[data-tier="desktop"].mode-single .submit-btn,
-.app-container[data-tier="desktop"].mode-single .submit-error {
+.app-container[data-tier="desktop"].mode-single .submit-error,
+.app-container[data-tier="desktop"].mode-single .history-nav {
   flex: 0 0 auto;
 }
 .app-container[data-tier="desktop"].mode-single .submit-btn {
   margin-top: 0;
+}
+
+/* ---- Drill view, full mode: the same frame, split side by side ---- */
+.app-container[data-tier="desktop"].mode-full .drill-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.app-container[data-tier="desktop"].mode-full .split-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- Feedback view: the white card IS the middle band ----
+   The card fills the space between chrome and the bottom of the frame, its
+   body is the only thing that scrolls, and the footer (Prev/Next plus
+   Back/Next Rep) is pinned so the buttons never move between reps. */
+.app-container[data-tier="desktop"] > .feedback-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-container[data-tier="desktop"] > .feedback-card > .feedback-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.app-container[data-tier="desktop"] > .feedback-card > .feedback-footer {
+  flex: 0 0 auto;
+}
+/* Session Complete has no inner body, so it scrolls as a whole rather than
+   clipping its last line on a short screen. */
+.app-container[data-tier="desktop"] > .session-complete {
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---------- Tablet: prompt and POI sit side by side, in both modes ---------- */
