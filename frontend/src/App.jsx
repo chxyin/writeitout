@@ -11,6 +11,10 @@ import {
   formattingVars
 } from './lib/formatting.js';
 import PaperBackground from './components/PaperBackground.jsx';
+// The game header's brand mark. Inlined for the same reason as the splash hero
+// logo (see Splash.jsx): an <img> would lose the SVG's Inter 900 lettering.
+import wordmarkMarkup from './assets/writeitout_transparent.svg?raw';
+import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
@@ -31,6 +35,12 @@ function describeApiError(data, status) {
   }
   if (status === 429) return 'The chair is busy. Please wait a moment and try again.';
   return `The chair could not grade that POI (error ${status}). Please try again.`;
+}
+
+/** 30 → "0:30", 90 → "1:30". The rep countdown in the top band. */
+function formatClock(seconds) {
+  const safe = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, '0')}`;
 }
 
 const SETTINGS_STORAGE_KEY = 'writeitout:settings';
@@ -113,11 +123,26 @@ export default function App() {
   const [formExiting, setFormExiting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  // Remaining seconds on the current rep when the splash screen asked for a
+  // timer; 0 = the clock is off, or a timed rep has run out.
+  const [timeLeft, setTimeLeft] = useState(0);
+
+  // View routing. The splash screen collects the practice settings; the game view
+  // is the drill loop below. gameSettings is what Play handed over —
+  // { reps, timer, streak, hints, sound, shake } — or null before the first
+  // session. Only reps and timer are wired so far; the four toggles are carried
+  // along for the features the handoff still lists (streak, hints, sound, shake).
+  const [currentView, setCurrentView] = useState('splash');
+  const [gameSettings, setGameSettings] = useState(null);
 
   // Session length is the single source of truth for the progress bar, the
-  // next-rep check and the completion screen. The set-length / repetition
-  // picker will write to this state instead of a hard-coded number.
-  const [sessionLength] = useState(5);
+  // next-rep check and the completion screen. It comes from the splash screen's
+  // Reps picker now; ∞ arrives as Infinity, which is exactly "there is no last
+  // rep", so the completion screen never fires for it.
+  const sessionLength = gameSettings ? gameSettings.reps : 5;
+  const unlimitedSession = !Number.isFinite(sessionLength);
+  // Seconds allowed per rep, 0 meaning the timer is off.
+  const repSeconds = gameSettings ? gameSettings.timer : 0;
 
   // Settings state. Restored from localStorage on the first render, then
   // written back on every change so the app opens the way it was left.
@@ -185,17 +210,36 @@ export default function App() {
       setHistory([createRep(drill)]);
       setCurrentIndex(0);
       setPoi('');
+      // First rep of a session: the splash screen's Timer value starts over.
+      setTimeLeft(repSeconds);
     } catch (error) {
       setDrillError(error.message);
     } finally {
       setLoadingDrill(false);
     }
-  }, [requestDrill]);
+  }, [requestDrill, repSeconds]);
 
+  // The first drill is fetched when the game view opens, not on mount: a session
+  // only exists once Play has been pressed, and the splash screen has no use for
+  // a speech. `history.length` keeps a later re-render from fetching a second one.
   useEffect(() => {
+    if (currentView !== 'game' || history.length) return undefined;
     const loadDrill = setTimeout(loadFirstRep, 0);
     return () => clearTimeout(loadDrill);
-  }, [loadFirstRep]);
+  }, [currentView, history.length, loadFirstRep]);
+
+  // Rep timer, part 1 of 1: tick while a POI can still be written. The clock is
+  // reset by whatever puts a rep on screen (loadFirstRep / startNewRep /
+  // goToEntry) rather than by an effect, so the chip never renders a stale value
+  // for a frame. Feedback and the completion screen pause it, and at zero it
+  // stays at zero rather than submitting on the user's behalf.
+  useEffect(() => {
+    if (!repSeconds || showFeedback || sessionComplete || !currentDrill) return undefined;
+    const tick = setInterval(() => {
+      setTimeLeft((remaining) => (remaining > 0 ? remaining - 1 : 0));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [repSeconds, showFeedback, sessionComplete, currentDrill]);
 
   // < Prev / Next > and ← Back share this: load a saved rep, no API call. The
   // entry's own POI is pushed back into the textarea so an old answer can still
@@ -209,8 +253,10 @@ export default function App() {
     setSubmitError('');
     setDrillError('');
     setFormExiting(false);
+    // Same rule as a fresh rep: the countdown belongs to the rep on screen.
+    setTimeLeft(repSeconds);
     if (exitTimer.current) clearTimeout(exitTimer.current);
-  }, [history]);
+  }, [history, repSeconds]);
 
   useEffect(() => {
     document.body.className = '';
@@ -283,12 +329,13 @@ export default function App() {
         setCurrentIndex(history.length);
       }
       setPoi('');
+      setTimeLeft(repSeconds);
     } catch (error) {
       setDrillError(error.message);
     } finally {
       setLoadingDrill(false);
     }
-  }, [currentEntry, currentIndex, history.length, loadingDrill, requestDrill]);
+  }, [currentEntry, currentIndex, history.length, loadingDrill, repSeconds, requestDrill]);
 
   const wordCount = poi.trim() ? poi.trim().split(/\s+/).length : 0;
 
@@ -391,6 +438,22 @@ export default function App() {
     return 'var(--accent-red)';
   };
 
+  // The splash screen replaces the whole shell — no gear, no papers of its own,
+  // no progress bar: it is its own full-screen view with its own settings card.
+  // Every hook above has already run, so this early return costs nothing.
+  if (currentView === 'splash') {
+    return (
+      <Splash
+        animOn={animOn}
+        lowIntensity={lowIntensity}
+        onStart={(next) => {
+          setGameSettings(next);
+          setCurrentView('game');
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <SettingsMenu
@@ -432,22 +495,38 @@ export default function App() {
         {/* Top band: progress + mode toggle, never shrinks and never scrolls. */}
         <div className="app-top">
           <div className="progress-bar stagger-in stagger-1">
+            {/* Brand mark: the wordmark inlined (see the import) so its Inter 900
+                lettering and its own <style> survive. Decorative here — the page
+                title already carries the name. */}
+            <span className="app-logo" aria-hidden="true" dangerouslySetInnerHTML={{ __html: wordmarkMarkup }} />
             <div
               className="progress-segments"
               role="progressbar"
               aria-label="Session progress"
               aria-valuemin={0}
-              aria-valuemax={sessionLength}
+              aria-valuemax={unlimitedSession ? undefined : sessionLength}
               aria-valuenow={gradedCount}
             >
-              {Array.from({ length: sessionLength }, (_, index) => (
+              {/* ∞ has no segment count to draw, so the counter carries progress. */}
+              {!unlimitedSession && Array.from({ length: sessionLength }, (_, index) => (
                 <span
                   key={index}
                   className={`progress-segment ${index < gradedCount ? 'filled' : ''}`}
                 />
               ))}
             </div>
-            <span className="progress-counter">{Math.min(currentIndex + 1, sessionLength)} / {sessionLength}</span>
+            <span className="progress-counter">
+              {unlimitedSession ? `${gradedCount} / ∞` : `${Math.min(currentIndex + 1, sessionLength)} / ${sessionLength}`}
+            </span>
+            {repSeconds > 0 && (
+              <span
+                className={`rep-timer ${timeLeft === 0 ? 'is-done' : ''}`.trim()}
+                role="timer"
+                title={`${repSeconds} seconds per rep`}
+              >
+                {formatClock(timeLeft)}
+              </span>
+            )}
           </div>
           <div className="toggle-container stagger-in stagger-2">
             <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>

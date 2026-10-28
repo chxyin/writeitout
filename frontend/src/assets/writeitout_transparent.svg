@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 133" width="100%" height="100%">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,900;1,900&amp;display=swap');
+      .logo-text { 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+        font-weight: 900; 
+        font-size: 39px; 
+        fill: #FFFFFF; 
+        letter-spacing: -1px; 
+      }
+    </style>
+  </defs>
+
+  <g transform="translate(6, 0)">
+    <g transform="translate(58.5, 66.5) rotate(-10) translate(-58.5, -66.5)">
+      <rect x="31" y="31" width="55" height="71" rx="5" fill="#FFFFFF" />
+      <path d="M 69 102 L 81 102 Q 86 102 86 97 L 86 85 Z" fill="#E8E8E8" />
+      <path d="M 69 102 L 86 85 L 86 97 Q 86 102 81 102 Z" fill="#D0D0D0" />
+      <rect x="41" y="45" width="28" height="5" rx="2.5" fill="#2B5CE6" />
+      <rect x="41" y="54" width="20" height="5" rx="2.5" fill="#FF9500" />
+      <rect x="41" y="63" width="14" height="5" rx="2.5" fill="#2B5CE6" />
+    </g>
+    <text x="100" y="66.5" dominant-baseline="central" class="logo-text">
+      writeit<tspan dx="1" font-style="italic" fill="#FF9500" stroke="#FF9500" stroke-width="0.5">out</tspan>
+    </text>
+  </g>
+</svg>

@@ -341,6 +341,28 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
   color: rgba(255, 255, 255, 0.9);
 }
 
+/* Brand mark and rep countdown. Both live inside the progress row so the top
+   band keeps its single row of chrome; the wordmark is inlined markup (see
+   Splash.jsx), and only its box is sized here. */
+.app-logo { display: flex; align-items: center; flex: 0 0 auto; }
+.app-logo svg { display: block; height: 18px; width: auto; }
+.rep-timer {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: #fff;
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+.rep-timer.is-done { background: rgba(255, 59, 48, 0.28); border-color: rgba(255, 59, 48, 0.6); color: #FFD9D6; }
+
 .toggle-container { display: flex; justify-content: center; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; }
 .toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border-radius: 20px; cursor: pointer; transition: 0.3s; }
 .toggle-switch.active { background: var(--accent-orange); }
@@ -1017,3 +1039,255 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .back-btn:active,
   .copy-btn:active { transform: scale(0.98); }
 }
+
+/* ============================================================
+   NEW SPLASH SCREEN
+   The two-panel sign-in / start-a-practice screen, ported from the
+   logged-out and logged-in mocks. Both states share this layout; only
+   the card under the logo changes.
+
+   Everything is scoped under .splash-screen on purpose. Each mock was a
+   whole page — a `*` reset, a `body` background, .toggle-switch, .paper,
+   .play-btn — and this file already owns a 50×28 .toggle-switch, the
+   .paper field and the body's blue grid for the drill view. Unscoped
+   copies appended at the end would win on source order and restyle the
+   game, so the selectors carry the scope instead.
+
+   The mocks' * / body rules are dropped rather than scoped: this file
+   already resets box-sizing, margins and padding, sets Inter, paints the
+   same blue 20px grid and hides scrollbars globally.
+   ============================================================ */
+
+.splash-screen {
+  /* The mock's :root palette, renamed: --bg / --accent are one letter away from
+     --bg-color / --accent-orange in this file, and the splash keeps its own
+     colours so the game's theme presets cannot tint it. */
+  --splash-bg: #2B5CE6;
+  --splash-grid: rgba(255, 255, 255, 0.07);
+  --splash-accent: #FF9500;
+  --splash-red: #FF3B30;
+  --splash-green: #34C759;
+  --splash-glass-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+  --splash-glass-border: rgba(255, 255, 255, 0.2);
+
+  /* fixed, not absolute: the splash owns the screen, so a theme background or
+     the app shell can never peek through at the edges. */
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  padding: 2rem;
+  /* The mocks leaned on body { overflow: hidden }, which clips a stacked mobile
+     column that is taller than the viewport. Scrolling here instead; the
+     split-layout's `margin: auto` keeps the desktop view centred when it fits. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  background-color: var(--splash-bg);
+  background-image:
+    linear-gradient(var(--splash-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--splash-grid) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Cards above, papers below: PaperBackground keeps z-index 0. */
+.splash-screen .split-layout { position: relative; z-index: 2; }
+.splash-screen .paper-container { z-index: 0; opacity: 0.45; }
+
+/* ---------- Split layout ---------- */
+.splash-screen .split-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 1100px;
+  gap: 5rem;
+  margin: auto;
+}
+
+.splash-screen .left-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  max-width: 450px;
+}
+
+.splash-screen .hero-logo {
+  width: 100%;
+  filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.4));
+  animation: floatLogo 4s ease-in-out infinite;
+}
+/* The wordmark files carry their own <style> for .logo-text (Inter 900, white).
+   That is a document-level rule, so it is kept exactly as the designer wrote it;
+   only the two wordmarks in this app use the class. */
+.splash-screen .hero-logo > svg { display: block; width: 100%; height: auto; }
+
+@keyframes floatLogo {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}
+
+.splash-screen .right-panel { flex: 1; display: flex; justify-content: flex-start; max-width: 480px; width: 100%; }
+
+.splash-screen .glass-card {
+  background: var(--splash-glass-bg);
+  border: 1px solid var(--splash-glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 24px;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  width: 100%;
+}
+
+.splash-screen .card-title { font-size: 1.4rem; font-weight: 900; text-align: center; margin-bottom: 0.5rem; }
+
+/* ---------- Settings card ---------- */
+.splash-screen .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.splash-screen .setting-label { font-size: 0.9rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+
+.splash-screen .segmented-control { display: flex; background: rgba(0, 0, 0, 0.4); border-radius: 10px; padding: 3px; gap: 3px; }
+.splash-screen .seg-btn {
+  background: transparent; border: none; border-radius: 8px; padding: 0.4rem 0.8rem;
+  font-family: inherit; font-size: 0.8rem; font-weight: 800;
+  color: rgba(255, 255, 255, 0.5); cursor: pointer; transition: all 0.2s;
+}
+.splash-screen .seg-btn.active { background: var(--splash-accent); color: #fff; box-shadow: 0 4px 10px rgba(255, 149, 0, 0.3); }
+.splash-screen .seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+.splash-screen .divider { height: 1px; background: rgba(255, 255, 255, 0.1); margin: 0.2rem 0; }
+
+/* The checkbox stays in the DOM but invisible; it is the switch's previous
+   sibling, which is what `:checked + .toggle-switch` reads. */
+.splash-screen .toggle-row { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.splash-screen .toggle-label { font-size: 0.9rem; font-weight: 600; }
+.splash-screen .toggle-switch {
+  position: relative; flex: 0 0 auto;
+  width: 42px; height: 24px; background: rgba(0, 0, 0, 0.4); border-radius: 20px; transition: 0.3s;
+}
+.splash-screen .toggle-switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: 0.3s;
+}
+.splash-screen input[type="checkbox"] { display: none; }
+.splash-screen input[type="checkbox"]:checked + .toggle-switch { background: var(--splash-accent); }
+.splash-screen input[type="checkbox"]:checked + .toggle-switch::after { transform: translateX(18px); }
+
+.splash-screen .play-btn {
+  background: var(--splash-red);
+  color: #fff;
+  font-family: inherit;
+  font-size: 1.2rem;
+  font-weight: 900;
+  padding: 1rem;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  box-shadow: 0 6px 0 #b3261e;
+}
+.splash-screen .play-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b3261e; }
+.splash-screen .play-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+
+/* ---------- Left-hand card: sign-in or profile ---------- */
+.splash-screen .auth-card { padding: 1.2rem 1.5rem; gap: 0.8rem; }
+.splash-screen .auth-subtitle { font-size: 0.85rem; text-align: center; color: rgba(255, 255, 255, 0.7); margin-bottom: 0.5rem; }
+
+.splash-screen .auth-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px; padding: 0.8rem; color: #fff;
+  font-family: inherit; font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; transition: background 0.2s; width: 100%;
+}
+.splash-screen .auth-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.splash-screen .auth-btn svg { width: 20px; height: 20px; }
+
+.splash-screen .user-row { display: flex; align-items: center; justify-content: space-between; }
+.splash-screen .user-info { display: flex; align-items: center; gap: 12px; }
+.splash-screen .avatar {
+  flex: 0 0 auto;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--splash-accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; font-weight: 900;
+  box-shadow: 0 4px 10px rgba(255, 149, 0, 0.4);
+}
+.splash-screen .user-text { display: flex; flex-direction: column; }
+.splash-screen .user-name { font-size: 1rem; font-weight: 800; }
+.splash-screen .user-level { font-size: 0.75rem; color: var(--splash-accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.splash-screen .logout-btn {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6); padding: 0.4rem 0.8rem;
+  border-radius: 8px; font-family: inherit; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+}
+.splash-screen .logout-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+/* ---------- Recent Sessions (logged in) ---------- */
+.splash-screen .history-section { display: flex; flex-direction: column; gap: 0.8rem; }
+.splash-screen .history-title {
+  font-size: 0.8rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: rgba(255, 255, 255, 0.6);
+}
+/* Scrollbars are hidden page-wide (top of this file), so the list asks for a slim
+   one back — 4px thumb on a dark track, as in the mock. The extra class beats the
+   `*` rule in both Chrome and Firefox. */
+.splash-screen .history-list {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  max-height: 140px; overflow-y: auto; padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) rgba(0, 0, 0, 0.2);
+  overscroll-behavior: contain;
+}
+.splash-screen .history-list::-webkit-scrollbar { display: block; width: 4px; }
+.splash-screen .history-list::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 4px; }
+.splash-screen .history-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+
+.splash-screen .history-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(0, 0, 0, 0.2); padding: 0.6rem 1rem; border-radius: 10px;
+  font-size: 0.85rem; border: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+.splash-screen .history-topic { font-weight: 600; color: rgba(255, 255, 255, 0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.splash-screen .history-date { color: rgba(255, 255, 255, 0.5); font-size: 0.75rem; margin-right: auto; margin-left: 1rem; }
+.splash-screen .history-score { font-weight: 900; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+.splash-screen .score-high { color: var(--splash-green); background: rgba(52, 199, 89, 0.15); }
+.splash-screen .score-mid { color: var(--splash-accent); background: rgba(255, 149, 0, 0.15); }
+.splash-screen .score-low { color: var(--splash-red); background: rgba(255, 59, 48, 0.15); }
+
+/* ---------- Mobile: one column, reordered ----------
+   .left-panel turns into display: contents, so the logo and the auth/profile card
+   become flex children of .split-layout and can be ordered around .right-panel:
+     logged out: logo (1) → sign-in (2) → settings (3)
+     logged in:  logo (1) → settings (2) → profile (3)
+   Both states share the 1/3 slots, so the two order rules hang off the state
+   class on .splash-screen instead of the mocks' duplicated block. 900px is the
+   mock's breakpoint and is kept on purpose: the game's own tiers (640/1024) are
+   about the drill view, not this screen. */
+@media (max-width: 900px) {
+  .splash-screen { padding: 1.5rem 1.25rem; }
+  .splash-screen .split-layout { flex-direction: column; gap: 2rem; }
+  .splash-screen .left-panel { display: contents; }
+  .splash-screen .hero-logo { order: 1; width: 100%; max-width: 480px; margin: 0 auto; }
+
+  .splash-screen.is-logged-out .auth-card { order: 2; width: 100%; max-width: 480px; }
+  .splash-screen.is-logged-out .right-panel { order: 3; width: 100%; max-width: 480px; justify-content: center; }
+
+  .splash-screen.is-logged-in .right-panel { order: 2; width: 100%; max-width: 480px; justify-content: center; }
+  .splash-screen.is-logged-in .auth-card { order: 3; width: 100%; max-width: 480px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-screen .hero-logo { animation: none; }
+}
+
