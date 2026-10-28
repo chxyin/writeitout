@@ -133,6 +133,15 @@ export default function App() {
     setSettings((previous) => ({ ...previous, [key]: value }));
   }, []);
 
+  // Settings → panel footer. A copy of the constant rather than the constant
+  // itself, so the state object never aliases the module-level default.
+  const resetSettings = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), []);
+  // Key by key, so the reset button greys out once there is nothing left to put
+  // back — the same "disabled at the default" rule the slider readouts follow.
+  const settingsAreDefault = Object.entries(DEFAULT_SETTINGS).every(
+    ([key, value]) => settings[key] === value
+  );
+
   // Responsive tier. Desktops keep the original wide layout, tablets split the
   // prompt and the POI field into two columns, phones get a single column.
   const { isMobile, isTablet, orientation } = useBreakpoint();
@@ -409,6 +418,8 @@ export default function App() {
         onTextSizeChange={(value) => updateSetting('textSize', value)}
         cardWidth={cardWidth}
         onCardWidthChange={(value) => updateSetting('cardWidth', value)}
+        onResetDefaults={resetSettings}
+        settingsAreDefault={settingsAreDefault}
       />
 
       <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />

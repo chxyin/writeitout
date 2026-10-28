@@ -104,7 +104,9 @@ export default function SettingsMenu({
   textSize,
   onTextSizeChange,
   cardWidth,
-  onCardWidthChange
+  onCardWidthChange,
+  onResetDefaults,
+  settingsAreDefault
 }) {
   // Kept in component state rather than in the persisted settings: the menu is
   // closed and reopened all the time, and which tab you looked at last is not a
@@ -226,6 +228,26 @@ export default function SettingsMenu({
               </p>
             </>
           )}
+
+          {/* One button for the whole panel, so it sits in the same place from
+              either tab: the point of the sliders is to try values out, and this
+              is the way back to the layout the app ships with. Greyed out once
+              every preference already sits at its default. */}
+          <div className="settings-reset-row">
+            <button
+              type="button"
+              className="settings-reset"
+              onClick={onResetDefaults}
+              disabled={settingsAreDefault}
+              title={
+                settingsAreDefault
+                  ? 'Every setting is already at its default'
+                  : 'Put the toggles, zoom, color, background and every slider back to their defaults'
+              }
+            >
+              Reset to defaults
+            </button>
+          </div>
         </div>
       )}
     </div>

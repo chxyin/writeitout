@@ -200,6 +200,28 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 
 .settings-note { font-size: 10px; font-weight: 600; line-height: 1.45; color: #8A8A8E; }
 
+/* Panel footer. The sliders clear one value at a time from their readouts; this
+   puts every preference back at once, so it sits behind a hairline rather than
+   reading as one more setting. It greys out while nothing differs. */
+.settings-reset-row { display: flex; padding-top: 11px; border-top: 1px solid #e8e8e8; }
+.settings-reset {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  background: #f7f7f7;
+  color: #555;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+.settings-reset:hover:not(:disabled) { border-color: #c2c2c2; background: #fff; color: #111; }
+.settings-reset:disabled { opacity: 0.45; cursor: default; }
+.settings-reset:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
+
 .toggle-switch-sm { position: relative; width: 36px; height: 20px; background: #ccc; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
 .toggle-switch-sm.active { background: var(--accent-orange); }
 .toggle-knob-sm { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
