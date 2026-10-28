@@ -1,5 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
 
+/* Scrollbars are hidden everywhere: the grid background is part of the design
+   and a grey OS scrollbar slicing through it reads as a rendering glitch.
+   Only the bar is hidden — wheel, trackpad, keyboard and touch scrolling all
+   keep working, and every scroller still contains its own content. Note this
+   also wins over .prompt-scroll's old `scrollbar-width: thin`. */
+* {
+  -ms-overflow-style: none; /* legacy Edge / IE */
+  scrollbar-width: none; /* Firefox */
+}
+::-webkit-scrollbar {
+  display: none; /* Chrome, Edge, Safari */
+}
+
 :root {
   --bg-color: #2B5CE6;
   --text-color: #FFFFFF;
@@ -270,7 +283,7 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-switch.active .toggle-knob { transform: translateX(22px); }
 
 .prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: 1.1rem; line-height: 1.5; position: relative; display: flex; flex-direction: column; min-height: 0; }
-.prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* The badge may wrap onto several lines on narrow panes, so cap its width to
    the card and give it a predictable line height for the space reserved below. */
 .prompt-tag { position: absolute; top: -12px; left: 20px; max-width: calc(100% - 40px); background: var(--accent-orange); color: white; font-size: 10px; font-weight: 800; line-height: 1.4; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; letter-spacing: 1px; }
@@ -500,6 +513,121 @@ textarea:focus {
    mirrors it onto <body> for page-level rules. Each tier block only
    overrides tokens; the layout rules above consume them.
    ============================================================ */
+
+/* ---------- Desktop: a centred 80vh shell with a pinned composer ----------
+   The shell is exactly 80% of the screen tall and <body> already centres its
+   flex children, so the top and bottom margins are equal by construction.
+   Inside, the column is: chrome (progress + toggle, fixed), the speech card
+   (absorbs whatever is left) and the composer band (textarea + Submit, 22vh).
+   That keeps Submit in the same spot on every rep, however long the speech is.
+   Heights are divided by --ui-scale because viewport units are not zoom-aware. */
+@media (min-width: 1025px) {
+  /* 1025px is the desktop edge in src/hooks/useBreakpoint.js. The shell height
+     lives in a media query rather than on [data-tier] so it is already right on
+     the first paint, before the hook has mirrored data-tier onto <body> — no
+     jump from full height to 80vh. */
+  body {
+    /* At zoom > 100% a width: 100% shell renders wider than the viewport, which
+       is what puts a phantom horizontal scrollbar along the bottom. Clip it
+       here instead of letting the page scroll sideways. */
+    overflow-x: hidden;
+  }
+  .app-container {
+    height: calc(80vh / var(--ui-scale));
+    min-height: 0;
+    max-height: calc(80vh / var(--ui-scale));
+    /* Hard ceiling: nothing inside may stretch the shell past 80vh. Long content
+       scrolls in its own pane below rather than growing the page. */
+    overflow: hidden;
+  }
+}
+
+/* Everything below is scoped to the desktop tier, so the tablet and mobile
+   blocks further down keep their own layouts untouched. */
+.app-container[data-tier="desktop"] .progress-bar,
+.app-container[data-tier="desktop"] .toggle-container {
+  /* Chrome of the shell never shrinks. */
+  flex-shrink: 0;
+}
+
+/* Feedback and Session Complete scroll inside the shell instead of pushing it. */
+.app-container[data-tier="desktop"] > .feedback-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-container[data-tier="desktop"] .drill-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Full mode already splits into two panes; it only needs to fill the column. */
+.app-container[data-tier="desktop"].mode-full .split-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Single mode used to flatten the panes into the shell column with
+   `display: contents`, which left the textarea and the Submit button as loose
+   siblings with no box to size. They become real boxes here — same visual
+   order and gap as before — so the maths below has something to measure. */
+.app-container[data-tier="desktop"].mode-single .split-panes {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  min-height: 0;
+}
+.app-container[data-tier="desktop"].mode-single .left-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The speech text takes all the space the composer does not need. The scroll
+   stays on .prompt-scroll: the topic badge hangs 12px above the card, so the
+   card itself must not clip its overflow. */
+.app-container[data-tier="desktop"].mode-single .prompt-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.app-container[data-tier="desktop"].mode-single .prompt-scroll {
+  flex: 1 1 auto;
+}
+
+/* The composer: textarea + Submit in a 22vh band. min-height rather than a
+   fixed height so a validation message grows the band (the speech card gives
+   up the room) instead of being clipped, and flex-shrink: 0 keeps the band
+   from ever being squeezed by the speech above it. */
+.app-container[data-tier="desktop"].mode-single .right-pane {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  min-width: 0;
+  min-height: 22vh;
+}
+.app-container[data-tier="desktop"].mode-single .poi-input-area {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The textarea fills the band; the button below it keeps its own height, so
+   typing never nudges Submit out of place. */
+.app-container[data-tier="desktop"].mode-single textarea {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 64px;
+}
+.app-container[data-tier="desktop"].mode-single .submit-btn,
+.app-container[data-tier="desktop"].mode-single .submit-error {
+  flex: 0 0 auto;
+}
+.app-container[data-tier="desktop"].mode-single .submit-btn {
+  margin-top: 0;
+}
 
 /* ---------- Tablet: prompt and POI sit side by side, in both modes ---------- */
 .app-container[data-tier="tablet"] {
