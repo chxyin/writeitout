@@ -49,6 +49,14 @@
      the app shell so every px value scales together; the viewport-unit maths
      elsewhere divides by it to stay exactly one screen tall. */
   --ui-scale: 1;
+
+  /* Formatting preferences (Settings → Formatting). These are the neutral
+     middle options — "balanced / M / normal" is what the app has always looked
+     like. index.css maps each choice to a body class, and only inside the
+     desktop media query, so tablet and mobile layouts ignore them entirely. */
+  --app-bottom-offset: 10vh;
+  --speech-font-size: 1.1rem;
+  --speech-card-width: 100%;
 }
 
 body.theme-midnight { --bg-color: #121212; --grid-color: rgba(255, 255, 255, 0.03); --card-bg: rgba(255, 255, 255, 0.05); }
@@ -171,6 +179,46 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .background-option-spotlight { background: radial-gradient(circle at 70% 25%, #777, #17151d); color: #fff; }
 .background-option-plain { background: #e9e9e9; }
 .background-option.active { border-color: var(--accent-orange); box-shadow: 0 0 0 2px rgba(255,149,0,.25); }
+
+/* Settings tabs: General (page look, zoom) and Formatting (layout preferences).
+   A quiet segmented pill so it reads as a section switch, not as an action. */
+.settings-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; background: #f1f1f3; border-radius: 10px; }
+.settings-tab {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 4px;
+  background: none;
+  color: #666;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.settings-tab:hover:not(.active) { color: #222; }
+.settings-tab.active { background: #fff; color: #111; box-shadow: 0 1px 3px rgba(0,0,0,0.16); }
+.settings-tab:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
+
+/* Settings → Formatting: three-way segmented buttons, in the same visual
+   language as the background swatches above. */
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; width: 100%; }
+.segmented-option {
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  padding: 7px 2px;
+  background: #f7f7f7;
+  color: #555;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.segmented-option:hover:not(.active) { border-color: #c2c2c2; background: #fff; }
+.segmented-option.active { border-color: var(--accent-orange); background: #fff; color: #111; font-weight: 800; box-shadow: 0 0 0 2px rgba(255, 149, 0, 0.22); }
+.segmented-option:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
+.settings-note { font-size: 10px; font-weight: 600; line-height: 1.45; color: #8A8A8E; }
 
 .toggle-switch-sm { position: relative; width: 36px; height: 20px; background: #ccc; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
 .toggle-switch-sm.active { background: var(--accent-orange); }
@@ -574,13 +622,14 @@ textarea:focus {
    overrides tokens; the layout rules above consume them.
    ============================================================ */
 
-/* ---------- Desktop: a centred 80vh shell with a pinned composer ----------
-   The shell is exactly 80% of the screen tall and <body> already centres its
-   flex children, so the top and bottom margins are equal by construction.
-   Inside, the column is: chrome (progress + toggle, fixed), the speech card
-   (absorbs whatever is left) and the composer band (textarea + Submit, 22vh).
-   That keeps Submit in the same spot on every rep, however long the speech is.
-   Heights are divided by --ui-scale because viewport units are not zoom-aware. */
+/* ---------- Desktop: a bottom-anchored slab with a pinned composer ----------
+   The shell fills the screen minus Settings → Formatting → Bottom Offset, and
+   the top margin absorbs whatever is left, so by default (10vh) it sits centred
+   with equal 10vh margins above and below. Inside, the column is: chrome
+   (progress + toggle, fixed), the speech card (absorbs whatever is left) and the
+   composer band (textarea + Submit, 22vh). That keeps Submit in the same spot on
+   every rep, however long the speech is. Heights are divided by --ui-scale
+   because viewport units are not zoom-aware. */
 @media (min-width: 1025px) {
   /* 1025px is the desktop edge in src/hooks/useBreakpoint.js. The shell height
      lives in a media query rather than on [data-tier] so it is already right on
@@ -593,16 +642,61 @@ textarea:focus {
     overflow-x: hidden;
   }
   .app-container {
-    height: calc(80vh / var(--ui-scale));
+    /* Vertical placement is driven by Settings → Formatting → Bottom Offset.
+       The 80vh slab used to be centred by <body>; now the top margin takes
+       whatever the bottom offset does not, so the interface parks exactly
+       --app-bottom-offset above the bottom edge (10vh, the default, reproduces
+       the old centred look pixel for pixel). The height is what is left over,
+       which keeps the three numbers adding up to one screen — no page scroll.
+       Viewport units are not zoom-aware, so they are divided by --ui-scale;
+       the rem floor is not, because the shell is zoomed and so is the settings
+       button it is protecting. */
+    --shell-top: max(
+      calc((20vh - var(--app-bottom-offset)) / var(--ui-scale)),
+      4.25rem
+    );
+    --shell-bottom: calc(var(--app-bottom-offset) / var(--ui-scale));
+    height: calc(100vh / var(--ui-scale) - var(--shell-top) - var(--shell-bottom));
     min-height: 0;
-    max-height: calc(80vh / var(--ui-scale));
-    /* Hard ceiling: nothing inside may stretch the shell past 80vh. Long content
-       scrolls in its own pane below rather than growing the page. */
+    max-height: calc(100vh / var(--ui-scale) - var(--shell-top) - var(--shell-bottom));
+    margin-top: var(--shell-top);
+    margin-bottom: var(--shell-bottom);
+    /* Hard ceiling: nothing inside may stretch the shell past its band. Long
+       content scrolls in its own pane below rather than growing the page. */
     overflow: hidden;
     /* The shell's gap is what separates the three bands (--layout-gap is 1.5rem
        on desktop, 1.25rem on tablet, 1rem on mobile), so every band sits the
        same distance apart as the bands inside the composer. */
     gap: var(--layout-gap);
+  }
+
+  /* ---- Settings → Formatting ----
+     Every rule for these preferences lives in this block on purpose: the tablet
+     tier splits the screen into two panes and phones are locked to 100dvh at
+     full width, so a wider card or a bigger speech font would fight those
+     layouts. The body classes are harmless elsewhere — they only carry values
+     that nothing outside this block reads. */
+  body.offset-tight { --app-bottom-offset: 2vh; }
+  body.offset-balanced { --app-bottom-offset: 10vh; }
+  body.offset-loose { --app-bottom-offset: 20vh; }
+  body.text-s { --speech-font-size: 0.95rem; }
+  body.text-m { --speech-font-size: 1.1rem; }
+  body.text-l { --speech-font-size: 1.3rem; }
+  /* Narrow and wide resize the shell as well: an 800px card cannot fit in the
+     600px single column, and a 500px card floating in a 600px column would leave
+     Submit and the progress bar wider than the card. 564 = 500 card + the two
+     2rem gutters, 864 = 800 card + the same gutters. The two-pane shell scales
+     with it so the setting is not a no-op in full mode. */
+  body.width-narrow { --speech-card-width: 500px; --layout-max-single: 564px; --layout-max-full: 960px; }
+  body.width-normal { --speech-card-width: 100%; }
+  body.width-wide { --speech-card-width: 800px; --layout-max-single: 864px; --layout-max-full: 1320px; }
+
+  .app-container .prompt-card { font-size: var(--speech-font-size); }
+  /* Only the single-column view has one card with slack around it; in full mode
+     the split panes decide the width. */
+  .app-container.mode-single .prompt-card {
+    width: var(--speech-card-width);
+    margin: 0 auto;
   }
 }
 

@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SettingsMenu from './components/SettingsMenu.jsx';
 import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
+import {
+  OFFSET_OPTIONS,
+  DEFAULT_BOTTOM_OFFSET,
+  TEXT_SIZE_OPTIONS,
+  DEFAULT_TEXT_SIZE,
+  CARD_WIDTH_OPTIONS,
+  DEFAULT_CARD_WIDTH,
+  pickOption,
+  formattingClasses
+} from './lib/formatting.js';
 import PaperBackground from './components/PaperBackground.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
@@ -38,7 +48,12 @@ const DEFAULT_SETTINGS = {
   lowIntensity: false,
   theme: 'default',
   background: 'grid',
-  zoom: DEFAULT_ZOOM
+  zoom: DEFAULT_ZOOM,
+  // Settings → Formatting. "balanced / m / normal" is what the app has always
+  // looked like, so the defaults never change the initial layout.
+  bottomOffset: DEFAULT_BOTTOM_OFFSET,
+  textSize: DEFAULT_TEXT_SIZE,
+  cardWidth: DEFAULT_CARD_WIDTH
 };
 
 /**
@@ -62,7 +77,10 @@ function loadSettings() {
     lowIntensity: Boolean(parsed.lowIntensity ?? DEFAULT_SETTINGS.lowIntensity),
     theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
     background: typeof parsed.background === 'string' ? parsed.background : DEFAULT_SETTINGS.background,
-    zoom: clampZoom(parsed.zoom ?? DEFAULT_SETTINGS.zoom)
+    zoom: clampZoom(parsed.zoom ?? DEFAULT_SETTINGS.zoom),
+    bottomOffset: pickOption(parsed.bottomOffset, OFFSET_OPTIONS, DEFAULT_BOTTOM_OFFSET),
+    textSize: pickOption(parsed.textSize, TEXT_SIZE_OPTIONS, DEFAULT_TEXT_SIZE),
+    cardWidth: pickOption(parsed.cardWidth, CARD_WIDTH_OPTIONS, DEFAULT_CARD_WIDTH)
   };
 }
 
@@ -101,6 +119,8 @@ export default function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
   const { animOn, showTopic, showComm, theme, background, lowIntensity, zoom } = settings;
+  // Settings → Formatting: spacing and type, carried to CSS as body classes.
+  const { bottomOffset, textSize, cardWidth } = settings;
   const exitTimer = useRef(null);
 
   const updateSetting = useCallback((key, value) => {
@@ -185,7 +205,13 @@ export default function App() {
     if (!showComm) document.body.classList.add('hide-comm');
     document.body.classList.add(`background-${background}`);
     if (lowIntensity) document.body.classList.add('low-intensity');
-  }, [theme, background, lowIntensity, animOn, showTopic, showComm]);
+    // The line above wipes every class on <body>, so the formatting classes have
+    // to be re-applied here rather than in an effect of their own — otherwise
+    // changing the theme would silently drop the spacing preferences.
+    formattingClasses({ bottomOffset, textSize, cardWidth }).forEach((name) =>
+      document.body.classList.add(name)
+    );
+  }, [theme, background, lowIntensity, animOn, showTopic, showComm, bottomOffset, textSize, cardWidth]);
 
   useEffect(() => {
     persistSettings(settings);
@@ -364,6 +390,12 @@ export default function App() {
         onBackgroundChange={(value) => updateSetting('background', value)}
         zoom={zoom}
         onZoomChange={(value) => updateSetting('zoom', value)}
+        bottomOffset={bottomOffset}
+        onBottomOffsetChange={(value) => updateSetting('bottomOffset', value)}
+        textSize={textSize}
+        onTextSizeChange={(value) => updateSetting('textSize', value)}
+        cardWidth={cardWidth}
+        onCardWidthChange={(value) => updateSetting('cardWidth', value)}
       />
 
       <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />
