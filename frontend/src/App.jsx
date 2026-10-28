@@ -83,6 +83,11 @@ export default function App() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // Session length is the single source of truth for the progress bar, the
+  // next-rep check and the completion screen. The set-length / repetition
+  // picker will write to this state instead of a hard-coded number.
+  const [sessionLength] = useState(5);
+
   // Settings state. Restored from localStorage on the first render, then
   // written back on every change so the app opens the way it was left.
   const [showMenu, setShowMenu] = useState(false);
@@ -215,11 +220,19 @@ export default function App() {
     setSubmitError('');
     const nextRepCount = repCount + 1;
     setRepCount(nextRepCount);
-    if (nextRepCount >= 5) {
+    if (nextRepCount >= sessionLength) {
       setSessionComplete(true);
       return;
     }
     fetchRandomDrill();
+  };
+
+  const handleBackToEdit = () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    setFeedback(null);
+    setShowFeedback(false);
+    setFormExiting(false);
+    setSubmitError('');
   };
 
   const handleStartSession = () => {
@@ -272,7 +285,24 @@ export default function App() {
         data-tier={tier}
         data-orientation={orientation}
       >
-        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: `${(repCount / 5) * 100}%` }}></div></div>
+        <div className="progress-bar stagger-in stagger-1">
+          <div
+            className="progress-segments"
+            role="progressbar"
+            aria-label="Session progress"
+            aria-valuemin={0}
+            aria-valuemax={sessionLength}
+            aria-valuenow={repCount}
+          >
+            {Array.from({ length: sessionLength }, (_, index) => (
+              <span
+                key={index}
+                className={`progress-segment ${index < repCount ? 'filled' : ''}`}
+              />
+            ))}
+          </div>
+          <span className="progress-counter">{Math.min(repCount + 1, sessionLength)} / {sessionLength}</span>
+        </div>
         <div className="toggle-container stagger-in stagger-2">
           <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
           <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
@@ -282,7 +312,7 @@ export default function App() {
         </div>
 
         {sessionComplete ? (
-          <SessionComplete onStart={handleStartSession} />
+          <SessionComplete onStart={handleStartSession} total={sessionLength} />
         ) : !showFeedback ? (
           <DrillForm
             formExiting={formExiting}
@@ -301,7 +331,9 @@ export default function App() {
           <FeedbackCard
             feedback={feedback}
             scoreColor={getScoreColor(feedback.score)}
+            originalPoi={poi}
             onNext={handleNextRep}
+            onBack={handleBackToEdit}
           />
         )}
       </div>

@@ -11,6 +11,20 @@ export default function DrillForm({
   onPoiChange,
   onSubmit
 }) {
+  // Colour cues only: there is no hard limit, but a delegate should see when a
+  // POI is getting long enough that a chair may cut them off.
+  const counterTone =
+    wordCount >= 60 ? 'word-hard' : wordCount >= 50 ? 'word-soft' : wordCount >= 35 ? 'word-warn' : '';
+
+  const handleKeyDown = (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      // Mirrors the Submit button's disabled state so the shortcut never fires
+      // on an empty draft or while a grade is already in flight.
+      if (poi && !loading) onSubmit();
+    }
+  };
+
   return (
     <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
       <div className="split-panes">
@@ -33,12 +47,14 @@ export default function DrillForm({
             <div className="poi-input-area stagger-in stagger-4">
               <div className="input-label">
                 <span>Your POI</span>
-                <span className="word-counter">{wordCount} words</span>
+                <span className={`word-counter ${counterTone}`.trim()}>{wordCount} words</span>
               </div>
               <textarea
                 value={poi}
                 onChange={(event) => onPoiChange(event.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="Type your Point of Information here..."
+                title="Ctrl/Cmd + Enter to submit"
               />
             </div>
 

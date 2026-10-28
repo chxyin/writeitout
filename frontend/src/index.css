@@ -236,8 +236,32 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .mode-full .prompt-card { height: 100%; max-height: var(--layout-prompt-max-height); }
 .mode-full .submit-btn { margin-top: 0; }
 .mode-full > .feedback-card { align-self: center; width: 100%; }
-.progress-bar { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; }
-.progress-fill { width: 40%; height: 100%; background: var(--accent-orange); border-radius: 10px; transition: width 0.45s var(--ease-out-premium); }
+/* Segmented progress: one block per rep, with the current rep number on the
+   right. The block count follows the session length, so 5/10/20 all work. */
+.progress-bar { display: flex; align-items: center; gap: 10px; width: 100%; }
+.progress-segments { display: flex; flex: 1 1 auto; gap: 4px; min-width: 0; }
+.progress-segment {
+  flex: 1 1 0;
+  height: 8px;
+  min-width: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.35s var(--ease-out-premium), box-shadow 0.35s var(--ease-out-premium);
+}
+.progress-segment.filled {
+  background: var(--accent-orange);
+  box-shadow: 0 0 10px rgba(255, 149, 0, 0.4);
+}
+.progress-counter {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.9);
+}
 
 .toggle-container { display: flex; justify-content: center; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; }
 .toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border-radius: 20px; cursor: pointer; transition: 0.3s; }
@@ -253,6 +277,10 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 
 .input-label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
 .word-counter { color: rgba(255, 255, 255, 0.6); transition: color 0.2s ease; }
+/* Gentle nudge, not a limit: 35+ yellow, 50+ light red, 60+ red. */
+.word-counter.word-warn { color: #FFD60A; }
+.word-counter.word-soft { color: #FF9F8F; }
+.word-counter.word-hard { color: var(--accent-red); }
 textarea {
   width: 100%;
   height: var(--layout-textarea-height);
@@ -370,6 +398,67 @@ textarea:focus {
 .rewrite-box { background: #FFF4E5; border-left: 4px solid var(--accent-orange); padding: 1rem; border-radius: 0 8px 8px 0; margin-top: 1.5rem; }
 .rewrite-box span { color: var(--accent-orange); font-weight: 800; font-size: 0.8rem; text-transform: uppercase; display: block; margin-bottom: 0.5rem; }
 .rewrite-box p { font-style: italic; font-weight: 600; margin: 0; }
+.rewrite-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 0.5rem; }
+.rewrite-header span { margin-bottom: 0; }
+.copy-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 149, 0, 0.45);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--accent-orange);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s var(--ease-out-premium), box-shadow 0.2s ease;
+}
+.copy-btn:hover { background: #fff; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255, 149, 0, 0.22); }
+.copy-btn:active { transform: scale(0.96); }
+.see-poi-link {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #B26B00;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.see-poi-link:hover { color: var(--accent-orange); }
+.rewrite-box .original-poi {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255, 149, 0, 0.45);
+  font-style: italic;
+  font-weight: 500;
+  color: #6B4A12;
+}
+.feedback-actions { display: flex; align-items: stretch; gap: 0.75rem; margin-top: 2rem; }
+.back-btn {
+  flex: 0 0 auto;
+  padding: 1rem 1.25rem;
+  border: 1px solid rgba(43, 92, 230, 0.3);
+  border-radius: 50px;
+  background: #EEF2FF;
+  color: var(--bg-color);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-out-premium), background 0.2s ease, box-shadow 0.2s ease;
+}
+.back-btn:hover {
+  background: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(43, 92, 230, 0.18);
+}
+.back-btn:active { transform: scale(0.97); }
 .next-btn {
   background: var(--bg-color);
   color: white;
@@ -390,6 +479,9 @@ textarea:focus {
   transform: scale(0.97);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
 }
+/* Inside the feedback row the buttons share the space; the row itself owns the
+   top margin so the pair lines up with the single-column Session Complete. */
+.feedback-actions .next-btn { flex: 1 1 auto; margin-top: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .stagger-in,
@@ -458,7 +550,8 @@ textarea:focus {
   min-height: var(--layout-textarea-min-height);
 }
 .app-container[data-tier="tablet"] .submit-btn,
-.app-container[data-tier="tablet"] .next-btn {
+.app-container[data-tier="tablet"] .next-btn,
+.app-container[data-tier="tablet"] .back-btn {
   flex-shrink: 0;
   min-height: var(--layout-touch-target);
 }
@@ -563,11 +656,13 @@ body[data-tier="mobile"] {
 }
 .app-container[data-tier="mobile"] .poi-input-area,
 .app-container[data-tier="mobile"] .submit-btn,
-.app-container[data-tier="mobile"] .next-btn {
+.app-container[data-tier="mobile"] .next-btn,
+.app-container[data-tier="mobile"] .back-btn {
   flex-shrink: 0;
 }
 .app-container[data-tier="mobile"] .submit-btn,
-.app-container[data-tier="mobile"] .next-btn {
+.app-container[data-tier="mobile"] .next-btn,
+.app-container[data-tier="mobile"] .back-btn {
   min-height: var(--layout-touch-target);
   padding: 1rem;
 }
@@ -608,6 +703,12 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .settings-btn:hover,
   .submit-btn:hover:not(:disabled),
   .next-btn:hover,
+  .back-btn:hover,
+  .copy-btn:hover,
+  .see-poi-link:hover,
   .theme-dot:hover { transform: none; }
-  .submit-btn:active:not(:disabled), .next-btn:active { transform: scale(0.98); }
+  .submit-btn:active:not(:disabled),
+  .next-btn:active,
+  .back-btn:active,
+  .copy-btn:active { transform: scale(0.98); }
 }

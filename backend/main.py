@@ -21,7 +21,7 @@ import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 load_dotenv()
 
@@ -52,8 +52,9 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_TIMEOUT_SECONDS = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "40"))
 
 MAX_SPEECH_CHARS = 6000
-MAX_POI_CHARS = 1000
-MAX_POI_WORDS = 40
+# Safety ceiling only. There is deliberately no word cap: the trainer lets a
+# delegate argue at whatever length the point needs.
+MAX_POI_CHARS = 10000
 
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -190,7 +191,7 @@ def load_speeches() -> list[dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- #
-# Request model: server-side validation mirrors the UI's 40-word limit
+# Request model
 # --------------------------------------------------------------------------- #
 class POIRequest(BaseModel):
     """Payload for /api/grade. Surrounding whitespace is stripped first."""
@@ -200,16 +201,6 @@ class POIRequest(BaseModel):
     speech: str = Field(min_length=1, max_length=MAX_SPEECH_CHARS)
     poi: str = Field(min_length=1, max_length=MAX_POI_CHARS)
     is_solutions_only: bool = False
-
-    @field_validator("poi")
-    @classmethod
-    def _limit_poi_words(cls, value: str) -> str:
-        word_count = len(value.split())
-        if word_count > MAX_POI_WORDS:
-            raise ValueError(
-                f"POI must be {MAX_POI_WORDS} words or fewer (received {word_count})."
-            )
-        return value
 
 
 SYSTEM_PROMPT = """
@@ -224,7 +215,7 @@ RATING RUBRIC:
 
 TASK:
 Rewrite the user's POI so it scores a 9 or 10/10.
-REWRITE RULES: Single question, under 40 words. Simple, blunt HMUN language.
+REWRITE RULES: One focused question in simple, blunt HMUN language. No length cap and no filler.
 If is_solutions_only is True, the user is specifically attacking the solutions proposed in the speech. Grade them on how well they attack the feasibility, funding, or logic of those solutions.
 
 SECURITY RULES:
@@ -303,23 +294,106 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "dataset_loaded": _speeches is not None}
 
 
+# --------------------------------------------------------------------------- #
+# "Solutions Only" slice
+#
+# Solutions Only shows one contiguous slice of the speech. The slice has to
+# start at the beginning of the sentence that introduces the proposals (not
+# mid-word at "proposes...") and stop before the rhetorical close, which is
+# not part of the solutions.
+# --------------------------------------------------------------------------- #
+# Ordered by reliability. An explicit proposal verb outranks a list marker
+# because several speeches enumerate their *problems* with "Firstly/Secondly"
+# before they ever introduce a solution.
+_SOLUTION_ANCHOR_PATTERNS = (
+    re.compile(r"(?i)\bpropos(?:e|es|ing)\b"),
+    re.compile(r"(?i)\b(?:call(?:s|ed)\s+for|advocates?|recommends?)\b"),
+    re.compile(r"(?i)\b(?:first|second|third|fourth|fifth|last)\s+pillar\b"),
+    re.compile(r"(?m)^\s*(?:\d{1,2}[.)]|[-*\u2022\u2014])\s+"),
+    re.compile(r"(?i)\b(?:firstly|secondly|thirdly|fourthly|fifthly|lastly|finally)\b"),
+)
+
+_CLOSING_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"thank\s+you|"
+    r"let\s+all\s+those|"
+    r"in\s+conclusion|"
+    r"in\s+closing|"
+    r"yields?\s+the\s+floor|"
+    r"we\s+yield|"
+    r"the\s+delegate\s+yields?|"
+    r"call\s+upon\s+all|"
+    r"we\s+urg(?:e|es)\s+all|"
+    r"let\s+us"
+    r")"
+)
+
+_SENTENCE_BOUNDARY_PATTERN = re.compile(r"""[.!?]["')\]]?\s+""")
+
+
+def _sentence_start_before(text: str, index: int) -> int:
+    """Offset where the sentence containing ``index`` begins."""
+    boundary = 0
+    for match in _SENTENCE_BOUNDARY_PATTERN.finditer(text, 0, index):
+        boundary = match.end()
+    paragraph = text.rfind("\n\n", 0, index)
+    if paragraph != -1:
+        boundary = max(boundary, paragraph + 2)
+    return boundary
+
+
+def _trim_closing(segment: str) -> str:
+    """Drop a speech's closing flourish (e.g. "Thank you") from the slice."""
+    match = _CLOSING_PATTERN.search(segment)
+    if match is None:
+        return segment.strip()
+
+    if match.group(0).lower().replace(" ", "").startswith("thankyou"):
+        # "Thank you" is routinely glued to the last solution sentence, so cut
+        # exactly at the phrase; the other cues are whole closing sentences.
+        cut = match.start()
+    else:
+        cut = _sentence_start_before(segment, match.start())
+
+    if cut <= 0:
+        return segment.strip()
+    return segment[:cut].strip().rstrip(",;:-")
+
+
+def _find_solution_anchor(text: str) -> re.Match[str] | None:
+    """First match of the most reliable solution marker present in the text."""
+    for pattern in _SOLUTION_ANCHOR_PATTERNS:
+        match = pattern.search(text)
+        if match is not None:
+            return match
+    return None
+
+
+def _extract_solutions_claim(text: str) -> str:
+    """Reduce a full speech to its sentence-level solutions section."""
+    text = text.strip()
+    if not text:
+        return ""
+
+    start_match = _find_solution_anchor(text)
+    if start_match is not None:
+        start = _sentence_start_before(text, start_match.start())
+        return _trim_closing(text[start:])
+
+    # No cue at all: keep the old "a few sentences in" behaviour so the drill
+    # still shows a tractable slice of the speech.
+    sentences = _SENTENCE_BOUNDARY_PATTERN.split(text)
+    fallback = " ".join(sentences[2:6]) if len(sentences) > 4 else text
+    return _trim_closing(fallback)
+
+
 @app.get("/api/random-speech")
 def random_speech() -> dict[str, Any]:
     speeches = load_speeches()
 
     speech = random.choice(speeches)
     text = str(speech.get("text", "")).strip()
-
-    pattern = r"(?i)\b(propose|proposes|call for|calls for|establish|establishes|urge|urges|demand|demands|firstly|1\.)\b"
-    match = re.search(pattern, text)
-    if match:
-        single_claim = text[match.start():].strip()
-    else:
-        sentences = re.split(r"(?<=[.!?]) +", text)
-        single_claim = " ".join(sentences[2:5]) if len(sentences) > 3 else text
-
-    single_claim = re.sub(r"(?i)(thank you\.?|let all those.*)", "", single_claim).strip()
-    return {**speech, "single_claim": single_claim}
+    return {**speech, "single_claim": _extract_solutions_claim(text)}
 
 
 @app.post("/api/grade")

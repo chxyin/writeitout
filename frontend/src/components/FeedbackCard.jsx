@@ -1,4 +1,51 @@
-export default function FeedbackCard({ feedback, scoreColor, onNext }) {
+import { useEffect, useRef, useState } from 'react';
+
+const COPIED_RESET_MS = 1800;
+
+/**
+ * Copies text with the async Clipboard API when it is available, and falls
+ * back to a hidden textarea so the button still works on plain-HTTP hosts.
+ */
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  const succeeded = document.execCommand('copy');
+  document.body.removeChild(helper);
+  return succeeded ? Promise.resolve() : Promise.reject(new Error('Copy failed'));
+}
+
+export default function FeedbackCard({ feedback, scoreColor, originalPoi, onNext, onBack }) {
+  const [copied, setCopied] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const copyTimer = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      await copyToClipboard(feedback.rewritten_poi || '');
+      setCopied(true);
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    } catch {
+      // Clipboard access can be blocked; the rewrite stays selectable by hand.
+      setCopied(false);
+    }
+  };
+
   return (
     <div className="feedback-card">
       <div className="feedback-score" style={{ color: scoreColor }}>{feedback.score}/10</div>
@@ -8,13 +55,37 @@ export default function FeedbackCard({ feedback, scoreColor, onNext }) {
       <p><strong>Advice:</strong> {feedback.constructive_feedback}</p>
 
       <div className="rewrite-box">
-        <span>Your POI, Improved</span>
-        <p>"{feedback.rewritten_poi}"</p>
+        <div className="rewrite-header">
+          <span>Your POI, Improved</span>
+          <button type="button" className="copy-btn" onClick={handleCopy}>
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+        <p>&quot;{feedback.rewritten_poi}&quot;</p>
+
+        {originalPoi && (
+          <>
+            <button
+              type="button"
+              className="see-poi-link"
+              onClick={() => setShowOriginal((visible) => !visible)}
+              aria-expanded={showOriginal}
+            >
+              {showOriginal ? 'Hide your POI' : 'See your POI'}
+            </button>
+            {showOriginal && <p className="original-poi">&quot;{originalPoi}&quot;</p>}
+          </>
+        )}
       </div>
 
-      <button className="next-btn" onClick={onNext}>
-        Next Rep →
-      </button>
+      <div className="feedback-actions">
+        <button className="back-btn" type="button" onClick={onBack}>
+          ← Back
+        </button>
+        <button className="next-btn" type="button" onClick={onNext}>
+          Next Rep →
+        </button>
+      </div>
     </div>
   );
 }
