@@ -1150,9 +1150,10 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .card-title { font-size: 1.4rem; font-weight: 900; text-align: center; margin-bottom: 0.5rem; }
 
 /* ---------- Settings card ---------- */
-/* Reps carries seven segments now, so the row is allowed to wrap: on a narrow
-   card the control drops under its label instead of overflowing, and the control
-   itself wraps rather than pushing out through the card's padding. */
+/* Reps carries six segments now, and the timer five, so the row is allowed to
+   wrap: on a narrow card the control drops under its label instead of
+   overflowing, and the control itself wraps rather than pushing out through the
+   card's padding. */
 .splash-screen .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .splash-screen .setting-label { font-size: 0.9rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 
@@ -1313,8 +1314,9 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .splash-screen.is-logged-in .right-panel { order: 2; width: 100%; max-width: 480px; justify-content: center; }
   .splash-screen.is-logged-in .auth-card { order: 3; width: 100%; max-width: 480px; }
 
-  /* Seven rep segments on a phone-width card: tighten them a notch so the row
-     stays on one line, and let the card's own padding be the outer margin. */
+  /* Six rep segments (and five timer ones) on a phone-width card: tighten them a
+     notch so the row stays on one line, and let the card's own padding be the
+     outer margin. */
   .splash-screen .seg-btn { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
   .splash-screen .seg-input { width: 4.5rem; }
 }
