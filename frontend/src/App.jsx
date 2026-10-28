@@ -1,17 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const COLOR_THEMES = [
-  { id: 'default', label: 'Ocean', color: '#2B5CE6' },
-  { id: 'midnight', label: 'Midnight', color: '#121212' },
-  { id: 'forest', label: 'Forest', color: '#0B4A31' }
-];
-
-const BACKGROUNDS = [
-  { id: 'grid', label: 'Grid' },
-  { id: 'glow', label: 'Glow' },
-  { id: 'spotlight', label: 'Spotlight' },
-  { id: 'plain', label: 'Plain' }
-];
+import SettingsMenu from './components/SettingsMenu.jsx';
+import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
+import PaperBackground from './components/PaperBackground.jsx';
+import DrillForm from './components/DrillForm.jsx';
+import FeedbackCard from './components/FeedbackCard.jsx';
+import SessionComplete from './components/SessionComplete.jsx';
+import useBreakpoint from './hooks/useBreakpoint.js';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
@@ -30,6 +24,51 @@ function describeApiError(data, status) {
   return `The chair could not grade that POI (error ${status}). Please try again.`;
 }
 
+const SETTINGS_STORAGE_KEY = 'writeitout:settings';
+
+const DEFAULT_SETTINGS = {
+  animOn: true,
+  showTopic: true,
+  showComm: true,
+  lowIntensity: false,
+  theme: 'default',
+  background: 'grid',
+  zoom: DEFAULT_ZOOM
+};
+
+/**
+ * Restores the settings saved by a previous visit. Anything malformed is
+ * ignored field by field, so a stale or hand-edited entry can never break the
+ * first render (a bad number would otherwise reach the zoom CSS variable).
+ */
+function loadSettings() {
+  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+  let parsed;
+  try {
+    parsed = JSON.parse(window.localStorage.getItem(SETTINGS_STORAGE_KEY) || 'null');
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_SETTINGS;
+  return {
+    animOn: Boolean(parsed.animOn ?? DEFAULT_SETTINGS.animOn),
+    showTopic: Boolean(parsed.showTopic ?? DEFAULT_SETTINGS.showTopic),
+    showComm: Boolean(parsed.showComm ?? DEFAULT_SETTINGS.showComm),
+    lowIntensity: Boolean(parsed.lowIntensity ?? DEFAULT_SETTINGS.lowIntensity),
+    theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
+    background: typeof parsed.background === 'string' ? parsed.background : DEFAULT_SETTINGS.background,
+    zoom: clampZoom(parsed.zoom ?? DEFAULT_SETTINGS.zoom)
+  };
+}
+
+function persistSettings(settings) {
+  try {
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Private browsing or a full quota: the app still works, it just forgets.
+  }
+}
+
 export default function App() {
   const [currentDrill, setCurrentDrill] = useState(null);
   const [loadingDrill, setLoadingDrill] = useState(true);
@@ -43,16 +82,22 @@ export default function App() {
   const [formExiting, setFormExiting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  
-  // Settings State
+
+  // Settings state. Restored from localStorage on the first render, then
+  // written back on every change so the app opens the way it was left.
   const [showMenu, setShowMenu] = useState(false);
-  const [animOn, setAnimOn] = useState(true);
-  const [showTopic, setShowTopic] = useState(true);
-  const [showComm, setShowComm] = useState(true);
-  const [theme, setTheme] = useState('default');
-  const [background, setBackground] = useState('grid');
-  const [lowIntensity, setLowIntensity] = useState(false);
+  const [settings, setSettings] = useState(loadSettings);
+  const { animOn, showTopic, showComm, theme, background, lowIntensity, zoom } = settings;
   const exitTimer = useRef(null);
+
+  const updateSetting = useCallback((key, value) => {
+    setSettings((previous) => ({ ...previous, [key]: value }));
+  }, []);
+
+  // Responsive tier. Desktops keep the original wide layout, tablets split the
+  // prompt and the POI field into two columns, phones get a single column.
+  const { isMobile, isTablet, orientation } = useBreakpoint();
+  const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
 
   const activePrompt = currentDrill
     ? mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech
@@ -95,42 +140,27 @@ export default function App() {
   }, [theme, background, lowIntensity, animOn, showTopic, showComm]);
 
   useEffect(() => {
-    const container = document.getElementById('paper-container');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!animOn || lowIntensity) return;
-    const isTouch = window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
-    const paperCount = lowIntensity ? 3 : (isTouch ? 4 : 9);
-    for (let i = 0; i < paperCount; i++) {
-      const paper = document.createElement('div');
-      paper.classList.add('paper');
-      const size = Math.random() * 40 + 40;
-      paper.style.width = `${size}px`;
-      paper.style.height = `${size * 1.3}px`;
-      paper.style.left = `${Math.random() * 100}vw`;
-      paper.style.animationDuration = `${Math.random() * 10 + 18}s`;
-      paper.style.animationDelay = `${Math.random() * -20}s`;
-      paper.style.transform = `rotate(${Math.random() * 360}deg)`;
-      container.appendChild(paper);
-    }
+    persistSettings(settings);
+  }, [settings]);
 
-    let frameId = 0;
-    const onMove = (e) => {
-      if (frameId) return;
-      frameId = requestAnimationFrame(() => {
-      const x = (e.clientX / window.innerWidth - 0.5) * 28;
-      const y = (e.clientY / window.innerHeight - 0.5) * 18;
-      container.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-        frameId = 0;
-      });
-    };
-    const canParallax = window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)').matches;
-    if (canParallax) window.addEventListener('mousemove', onMove, { passive: true });
+  // Zoom rides on a single CSS variable consumed by the app shell and the
+  // settings button, so the whole UI scales consistently without any layout
+  // code knowing about it.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ui-scale', String(zoom));
+  }, [zoom]);
+
+  // Mirror the tier onto <body> so page-level rules (settings button, papers)
+  // follow the same breakpoints as the app shell. data-* survives the
+  // className reset above, so the two effects never fight each other.
+  useEffect(() => {
+    document.body.dataset.tier = tier;
+    document.body.dataset.orientation = orientation;
     return () => {
-      if (canParallax) window.removeEventListener('mousemove', onMove);
-      if (frameId) cancelAnimationFrame(frameId);
+      delete document.body.dataset.tier;
+      delete document.body.dataset.orientation;
     };
-  }, [animOn, lowIntensity]);
+  }, [tier, orientation]);
 
   useEffect(() => {
     return () => {
@@ -139,10 +169,9 @@ export default function App() {
   }, []);
 
   const wordCount = poi.trim() ? poi.trim().split(/\s+/).length : 0;
-  const isOverLimit = wordCount > 40;
 
   const handleSubmit = async () => {
-    if (!currentDrill || !poi || isOverLimit || loading) return;
+    if (!currentDrill || !poi || loading) return;
     setLoading(true);
     setSubmitError('');
     try {
@@ -204,6 +233,11 @@ export default function App() {
     fetchRandomDrill();
   };
 
+  const handlePoiChange = (value) => {
+    setPoi(value);
+    if (submitError) setSubmitError('');
+  };
+
   const getScoreColor = (score) => {
     if (score >= 9) return '#34C759';
     if (score >= 7) return 'var(--accent-orange)';
@@ -212,66 +246,32 @@ export default function App() {
 
   return (
     <>
-      <div className="settings-container">
-        <button className="settings-btn" onClick={() => setShowMenu(!showMenu)}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-        </button>
+      <SettingsMenu
+        open={showMenu}
+        onToggle={() => setShowMenu(!showMenu)}
+        animOn={animOn}
+        onAnimToggle={() => updateSetting('animOn', !animOn)}
+        showTopic={showTopic}
+        onShowTopicToggle={() => updateSetting('showTopic', !showTopic)}
+        showComm={showComm}
+        onShowCommToggle={() => updateSetting('showComm', !showComm)}
+        lowIntensity={lowIntensity}
+        onLowIntensityToggle={() => updateSetting('lowIntensity', !lowIntensity)}
+        theme={theme}
+        onThemeChange={(value) => updateSetting('theme', value)}
+        background={background}
+        onBackgroundChange={(value) => updateSetting('background', value)}
+        zoom={zoom}
+        onZoomChange={(value) => updateSetting('zoom', value)}
+      />
 
-        {showMenu && (
-          <div className="settings-menu">
-            <div className="setting-item">
-              <span>Falling Papers</span>
-              <div className={`toggle-switch-sm ${animOn ? 'active' : ''}`} onClick={() => setAnimOn(!animOn)}><div className="toggle-knob-sm"></div></div>
-            </div>
-            <div className="setting-item">
-              <span>Show Topic Tag</span>
-              <div className={`toggle-switch-sm ${showTopic ? 'active' : ''}`} onClick={() => setShowTopic(!showTopic)}><div className="toggle-knob-sm"></div></div>
-            </div>
-            <div className="setting-item">
-              <span>Show Comm/Delegation</span>
-              <div className={`toggle-switch-sm ${showComm ? 'active' : ''}`} onClick={() => setShowComm(!showComm)}><div className="toggle-knob-sm"></div></div>
-            </div>
-            <div className="setting-item">
-              <span>Low Intensity</span>
-              <div className={`toggle-switch-sm ${lowIntensity ? 'active' : ''}`} onClick={() => setLowIntensity(!lowIntensity)}><div className="toggle-knob-sm"></div></div>
-            </div>
-            <div style={{ height: '1px', background: '#ddd', margin: '4px 0' }}></div>
-            <div className="setting-item">
-              <span>Color</span>
-              <div className="theme-dots" role="group" aria-label="Choose color theme">
-                {COLOR_THEMES.map((option) => (
-                  <button
-                    className={`theme-dot ${theme === option.id ? 'active' : ''}`}
-                    style={{ '--theme-color': option.color }}
-                    aria-label={option.label}
-                    title={option.label}
-                    key={option.id}
-                    onClick={() => setTheme(option.id)}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="setting-item setting-item-column">
-              <span>Background</span>
-              <div className="background-options" role="group" aria-label="Choose background">
-                {BACKGROUNDS.map((option) => (
-                  <button
-                    className={`background-option background-option-${option.id} ${background === option.id ? 'active' : ''}`}
-                    key={option.id}
-                    onClick={() => setBackground(option.id)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />
 
-      <div className="paper-container" id="paper-container"></div>
-
-      <div className={`app-container mode-${mode}`}>
+      <div
+        className={`app-container mode-${mode}`}
+        data-tier={tier}
+        data-orientation={orientation}
+      >
         <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: `${(repCount / 5) * 100}%` }}></div></div>
         <div className="toggle-container stagger-in stagger-2">
           <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
@@ -282,81 +282,27 @@ export default function App() {
         </div>
 
         {sessionComplete ? (
-          <div className="session-complete feedback-card">
-            <div className="feedback-score">5/5</div>
-            <div className="feedback-label">Session Complete</div>
-            <p>Great job! You completed 5 reps.</p>
-            <button className="next-btn" onClick={handleStartSession}>
-              Start New Session
-            </button>
-          </div>
+          <SessionComplete onStart={handleStartSession} />
         ) : !showFeedback ? (
-          <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
-            <div className="split-panes">
-              <div className="left-pane">
-                {loadingDrill && <div className="loading-message">Loading new speech...</div>}
-                {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
-                {!loadingDrill && !drillError && currentDrill && (
-                  <div className="prompt-card stagger-in stagger-3">
-                    <span className="prompt-tag">
-                      <span>{currentDrill.topic}</span>
-                      <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
-                    </span>
-                    <div className="prompt-scroll">"{activePrompt}"</div>
-                  </div>
-                )}
-              </div>
-
-              <div className="right-pane">
-                {!loadingDrill && !drillError && currentDrill && <>
-                  <div className="poi-input-area stagger-in stagger-4">
-                    <div className="input-label">
-                      <span>Your POI</span>
-                      <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
-                    </div>
-                    {mode === 'single' && (
-                      <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px' }}>
-                        Your goal is to attack the funding, feasibility, or logic of these proposed solutions.
-                      </p>
-                    )}
-                    <textarea
-                      value={poi}
-                      onChange={(e) => {
-                        setPoi(e.target.value);
-                        if (submitError) setSubmitError('');
-                      }}
-                      placeholder="Type your Point of Information here..."
-                    />
-                  </div>
-
-                  {submitError && (
-                    <div className="submit-error" role="alert">{submitError}</div>
-                  )}
-
-                  <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
-                    {loading ? 'Chair is Grading...' : 'Submit POI'}
-                  </button>
-                </>}
-              </div>
-            </div>
-          </div>
+          <DrillForm
+            formExiting={formExiting}
+            loadingDrill={loadingDrill}
+            drillError={drillError}
+            currentDrill={currentDrill}
+            activePrompt={activePrompt}
+            poi={poi}
+            wordCount={wordCount}
+            submitError={submitError}
+            loading={loading}
+            onPoiChange={handlePoiChange}
+            onSubmit={handleSubmit}
+          />
         ) : (
-          <div className="feedback-card">
-            <div className="feedback-score" style={{ color: getScoreColor(feedback.score) }}>{feedback.score}/10</div>
-            <div className="feedback-label">{feedback.grade_label}</div>
-            
-            <p><strong>Reasoning:</strong> {feedback.reasoning}</p>
-            <p><strong>Advice:</strong> {feedback.constructive_feedback}</p>
-
-            <div className="rewrite-box">
-              <span>Your POI, Improved</span>
-              <p>"{feedback.rewritten_poi}"</p>
-            </div>
-
-            <button className="next-btn" onClick={handleNextRep}>
-              Next Rep →
-            </button>
-          </div>
+          <FeedbackCard
+            feedback={feedback}
+            scoreColor={getScoreColor(feedback.score)}
+            onNext={handleNextRep}
+          />
         )}
       </div>
     </>

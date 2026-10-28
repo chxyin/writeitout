@@ -10,6 +10,32 @@
   --background-art: none;
   --ease-out-premium: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+
+  /* Breakpoints — keep in sync with src/hooks/useBreakpoint.js */
+  --bp-mobile-max: 640px;
+  --bp-tablet-min: 641px;
+  --bp-tablet-max: 1024px;
+
+  /* Layout tokens. The values below are the desktop tier; the tier blocks at
+     the bottom of this file override them for tablet and mobile. */
+  --layout-max-single: 600px;
+  --layout-max-full: 1200px;
+  --layout-gutter-top: 2rem;
+  --layout-gutter-x: 2rem;
+  --layout-gutter-bottom: 2rem;
+  --layout-gap: 1.5rem;
+  --layout-column-gap: 2rem;
+  --layout-left-flex: 6;
+  --layout-right-flex: 4;
+  --layout-prompt-max-height: 70vh;
+  --layout-textarea-height: 100px;
+  --layout-textarea-min-height: 100px;
+  --layout-textarea-max-height: none;
+  --layout-touch-target: 0px;
+  /* UI scale, set by the Settings → Zoom control. It is applied with `zoom` on
+     the app shell so every px value scales together; the viewport-unit maths
+     elsewhere divides by it to stay exactly one screen tall. */
+  --ui-scale: 1;
 }
 
 body.theme-midnight { --bg-color: #121212; --grid-color: rgba(255, 255, 255, 0.03); --card-bg: rgba(255, 255, 255, 0.05); }
@@ -30,16 +56,16 @@ body.background-plain {
 
 html,
 body {
-  height: 100dvh;
-  width: 100vw;
-  overflow: hidden;
-  position: fixed;
+  min-height: 100%;
+  width: 100%;
 }
 
 body {
   font-family: 'Inter', sans-serif; background-color: var(--bg-color);
   background-image: var(--background-art), linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
   background-size: auto, 20px 20px, 20px 20px; color: var(--text-color); display: flex; justify-content: center; align-items: center; transition: background-color 0.3s ease;
+  min-height: 100dvh;
+  width: 100%;
 }
 body.background-grid {
   background-image: linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
@@ -75,7 +101,7 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .paper::after { content: ''; position: absolute; bottom: 0; right: 0; width: 20px; height: 20px; background: linear-gradient(135deg, transparent 50%, #D0D0D0 50%); border-bottom-right-radius: 4px; }
 @keyframes fall { 0% { transform: translateY(-10vh) translateX(0) rotate(0deg); opacity: 0; } 10% { opacity: 0.8; } 90% { opacity: 0.8; } 100% { transform: translateY(110vh) translateX(50px) rotate(360deg); opacity: 0; } }
 
-.settings-container { position: absolute; top: 20px; right: 20px; z-index: 100; }
+.settings-container { position: absolute; top: 20px; right: 20px; z-index: 100; zoom: var(--ui-scale); }
 .settings-btn { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: transform 0.22s var(--ease-out-premium), background 0.22s ease, box-shadow 0.22s ease; color: white; }
 .settings-btn:hover { background: rgba(255,255,255,0.22); transform: scale(1.08); box-shadow: 0 0 20px rgba(255, 149, 0, 0.35), 0 8px 15px rgba(0,0,0,0.2); }
 .settings-btn:active { transform: scale(0.96); }
@@ -92,6 +118,11 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
   box-shadow: 0 15px 35px rgba(0,0,0,0.35), 0 0 25px rgba(255, 149, 0, 0.25);
   flex-direction: column;
   gap: 12px;
+  /* Never taller than the screen: the menu scrolls internally on short
+     viewports instead of pushing its last rows out of reach. Viewport units
+     are not zoom-aware, so divide by the UI scale. */
+  max-height: calc(100dvh / var(--ui-scale) - 72px);
+  overflow-y: auto;
   transform-origin: top right;
   animation: menuPopPremium 0.36s var(--ease-spring) both;
 }
@@ -133,15 +164,76 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-knob-sm { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
 .toggle-switch-sm.active .toggle-knob-sm { transform: translateX(16px); }
 
-.app-container { position: relative; z-index: 1; width: 100%; height: 100dvh; max-width: 600px; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; transition: max-width 0.45s var(--ease-out-premium); }
-.app-container.mode-full { max-width: 1200px; }
+/* Settings → Zoom: −/slider/+ with the percentage doubling as a reset. */
+.setting-item-heading { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; }
+.zoom-value {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-orange);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.18s ease, opacity 0.18s ease;
+}
+.zoom-value:hover:not(:disabled) { background: rgba(255, 149, 0, 0.14); }
+.zoom-value:disabled { opacity: 0.55; cursor: default; }
+.zoom-controls { display: flex; align-items: center; gap: 8px; width: 100%; }
+.zoom-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d6d6d6;
+  border-radius: 10px;
+  background: #f7f7f7;
+  color: #333;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+.zoom-btn:hover:not(:disabled) { border-color: var(--accent-orange); background: #fff; }
+.zoom-btn:active:not(:disabled) { transform: scale(0.94); }
+.zoom-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.zoom-slider { flex: 1 1 auto; min-width: 0; height: 20px; margin: 0; padding: 0; accent-color: var(--accent-orange); cursor: pointer; background: transparent; border: none; border-radius: 0; box-shadow: none; }
+.zoom-slider:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; }
+
+.app-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  /* Viewport units are not zoom-aware, so divide by the UI scale to keep the
+     shell exactly one screen tall at any zoom level. */
+  min-height: calc(100dvh / var(--ui-scale));
+  max-width: var(--layout-max-single);
+  zoom: var(--ui-scale);
+  padding: var(--layout-gutter-top) var(--layout-gutter-x) var(--layout-gutter-bottom);
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  transition: max-width 0.45s var(--ease-out-premium);
+}
+.app-container.mode-full { max-width: var(--layout-max-full); }
+
+/* Desktop flow: single mode runs as one column, full mode splits into panes. */
 .split-panes { display: contents; }
 .left-pane,
 .right-pane { display: contents; }
-.mode-full .split-panes { display: flex; flex-direction: row; gap: 2rem; align-items: stretch; }
-.mode-full .left-pane { display: flex; flex: 6; min-width: 0; min-height: 0; }
-.mode-full .right-pane { display: flex; flex: 4; min-width: 0; min-height: 0; flex-direction: column; gap: 1.5rem; }
-.mode-full .prompt-card { height: 100%; max-height: 70vh; overflow: hidden; }
+.mode-full .split-panes { display: flex; flex-direction: row; gap: var(--layout-column-gap); align-items: stretch; }
+.mode-full .left-pane { display: flex; flex: var(--layout-left-flex); min-width: 0; min-height: 0; }
+.mode-full .right-pane { display: flex; flex: var(--layout-right-flex); min-width: 0; min-height: 0; flex-direction: column; gap: var(--layout-gap); }
+/* No overflow clipping here: the topic badge is positioned above the card
+   (top: -12px) and would be sliced in half in full mode. The inner
+   .prompt-scroll already contains the speech text. */
+.mode-full .prompt-card { height: 100%; max-height: var(--layout-prompt-max-height); }
 .mode-full .submit-btn { margin-top: 0; }
 .mode-full > .feedback-card { align-self: center; width: 100%; }
 .progress-bar { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); border-radius: 10px; overflow: hidden; }
@@ -155,13 +247,17 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 
 .prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: 1.1rem; line-height: 1.5; position: relative; display: flex; flex-direction: column; min-height: 0; }
 .prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.prompt-tag { position: absolute; top: -12px; left: 20px; background: var(--accent-orange); color: white; font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; letter-spacing: 1px; }
+/* The badge may wrap onto several lines on narrow panes, so cap its width to
+   the card and give it a predictable line height for the space reserved below. */
+.prompt-tag { position: absolute; top: -12px; left: 20px; max-width: calc(100% - 40px); background: var(--accent-orange); color: white; font-size: 10px; font-weight: 800; line-height: 1.4; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; letter-spacing: 1px; }
 
 .input-label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
 .word-counter { color: rgba(255, 255, 255, 0.6); transition: color 0.2s ease; }
 textarea {
   width: 100%;
-  height: 100px;
+  height: var(--layout-textarea-height);
+  min-height: var(--layout-textarea-min-height);
+  max-height: var(--layout-textarea-max-height);
   padding: 1.2rem;
   border-radius: 16px;
   border: 2px solid transparent;
@@ -218,7 +314,7 @@ textarea:focus {
   animation: fadeSlideUp 0.28s var(--ease-out-premium) both;
 }
 
-.drill-form { display: flex; flex-direction: column; gap: 1.5rem; }
+.drill-form { display: flex; flex-direction: column; gap: var(--layout-gap); }
 .drill-form.is-exiting {
   animation: formFadeOut 0.32s ease forwards;
   pointer-events: none;
@@ -306,39 +402,206 @@ textarea:focus {
   .paper-container { transition: none; }
 }
 
-@media (max-width: 768px) {
-  body {
-    overflow: hidden;
-    align-items: flex-start;
-    padding: 0;
-  }
+/* ============================================================
+   Responsive tiers
+   App.jsx sets data-tier on .app-container (via useBreakpoint) and
+   mirrors it onto <body> for page-level rules. Each tier block only
+   overrides tokens; the layout rules above consume them.
+   ============================================================ */
 
-  .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
-  .settings-btn { width: 44px; height: 44px; }
-  .settings-menu { width: min(260px, calc(100vw - 24px)); right: -4px; }
-  .app-container,
-  .app-container.mode-full { max-width: 680px; padding: max(3.5rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); gap: 1.15rem; }
-  .app-container { padding: max(3.5rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); gap: 1.15rem; }
-  .drill-form { flex: 1; min-height: 0; gap: 1.15rem; }
-  .split-panes,
-  .mode-full .split-panes { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 1.15rem; }
-  .left-pane,
-  .right-pane,
-  .mode-full .left-pane,
-  .mode-full .right-pane { display: flex; min-height: 0; flex-direction: column; gap: 1.15rem; }
-  .left-pane,
-  .mode-full .left-pane { flex: 1; }
-  .right-pane,
-  .mode-full .right-pane { flex: 0 0 auto; }
-  .prompt-card,
-  .mode-full .prompt-card { height: auto; max-height: none; flex: 1; }
-  .prompt-card { padding: 1.25rem; font-size: 1rem; }
-  textarea { min-height: 92px; height: 28vw; max-height: 140px; padding: 1rem; }
-  .poi-input-area,
-  .submit-btn,
-  .next-btn { flex-shrink: 0; }
-  .submit-btn, .next-btn { min-height: 52px; padding: 1rem; }
-  .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+/* ---------- Tablet: prompt and POI sit side by side, in both modes ---------- */
+.app-container[data-tier="tablet"] {
+  --layout-max-single: 900px;
+  --layout-max-full: 960px;
+  --layout-gutter-top: 1.75rem;
+  --layout-gutter-x: 1.75rem;
+  --layout-gutter-bottom: 1.75rem;
+  --layout-gap: 1.25rem;
+  --layout-column-gap: 1.5rem;
+  --layout-left-flex: 1;
+  --layout-right-flex: 1;
+  --layout-textarea-min-height: 140px;
+  --layout-touch-target: 48px;
+}
+.app-container[data-tier="tablet"] .split-panes {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--layout-column-gap);
+}
+.app-container[data-tier="tablet"] .left-pane,
+.app-container[data-tier="tablet"] .right-pane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  min-width: 0;
+  min-height: 0;
+}
+.app-container[data-tier="tablet"] .prompt-card {
+  height: auto;
+  max-height: var(--layout-prompt-max-height);
+  flex: 1 1 auto;
+  /* Extra top padding clears the topic badge, which hangs 12px above the card
+     and can wrap to three lines in a half-width pane. */
+  padding: 2.5rem 1.25rem 1.25rem;
+}
+.app-container[data-tier="tablet"] .poi-input-area {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-container[data-tier="tablet"] textarea {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: var(--layout-textarea-min-height);
+}
+.app-container[data-tier="tablet"] .submit-btn,
+.app-container[data-tier="tablet"] .next-btn {
+  flex-shrink: 0;
+  min-height: var(--layout-touch-target);
+}
+body[data-tier="tablet"] .settings-container { top: 16px; right: 16px; }
+body[data-tier="tablet"] .settings-btn { width: 44px; height: 44px; }
+body[data-tier="tablet"] .settings-menu { width: min(260px, calc(100vw - 32px)); }
+
+/* ---------- Mobile: fixed app shell, only the speech card scrolls ----------
+   The page itself never scrolls on phones. The shell is locked to one screen
+   and every pane in the chain below is allowed to shrink, so a long speech
+   scrolls inside its card while the POI field and Submit button stay pinned
+   to the bottom edge. */
+body[data-tier="mobile"] {
+  align-items: flex-start;
+  padding: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-container[data-tier="mobile"] {
+  --layout-max-single: 680px;
+  --layout-max-full: 680px;
+  --layout-gutter-top: max(3.5rem, env(safe-area-inset-top));
+  --layout-gutter-x: 1rem;
+  /* Home-indicator clearance on iOS, plain 1rem everywhere else. */
+  --layout-gutter-bottom: max(1rem, env(safe-area-inset-bottom));
+  --layout-gap: 1rem;
+  --layout-column-gap: 1rem;
+  --layout-textarea-height: 110px;
+  --layout-textarea-min-height: 92px;
+  --layout-textarea-max-height: 140px;
+  --layout-touch-target: 52px;
+  height: calc(100dvh / var(--ui-scale));
+  max-height: calc(100dvh / var(--ui-scale));
+  overflow: hidden;
+  justify-content: flex-start;
+}
+/* Chrome of the shell: progress and the mode toggle never shrink. */
+.app-container[data-tier="mobile"] .progress-bar,
+.app-container[data-tier="mobile"] .toggle-container {
+  flex-shrink: 0;
+}
+.app-container[data-tier="mobile"] .drill-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.app-container[data-tier="mobile"] .split-panes {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--layout-gap);
+}
+.app-container[data-tier="mobile"] .left-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  min-width: 0;
+  min-height: 0;
+}
+/* The input column keeps its natural height, so it stays anchored to the
+   bottom edge while the speech card above it gives up the space. */
+.app-container[data-tier="mobile"] .right-pane {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--layout-gap);
+  min-width: 0;
+  min-height: 0;
+}
+.app-container[data-tier="mobile"] .prompt-card {
+  /* No max-height here: the card grows into whatever the flex parent leaves
+     free, and the inner .prompt-scroll becomes the only scroller on screen.
+     The padding clears the topic badge, which can wrap to three lines. */
+  height: auto;
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2.25rem 1.25rem 1.25rem;
+  font-size: 1rem;
+}
+.app-container[data-tier="mobile"] .prompt-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.app-container[data-tier="mobile"] textarea {
+  padding: 1rem;
+}
+/* Feedback and session-complete screens take the whole shell and scroll
+   internally, so nothing is trapped by the locked page. */
+.app-container[data-tier="mobile"] .feedback-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 1.5rem;
+}
+.app-container[data-tier="mobile"] .poi-input-area,
+.app-container[data-tier="mobile"] .submit-btn,
+.app-container[data-tier="mobile"] .next-btn {
+  flex-shrink: 0;
+}
+.app-container[data-tier="mobile"] .submit-btn,
+.app-container[data-tier="mobile"] .next-btn {
+  min-height: var(--layout-touch-target);
+  padding: 1rem;
+}
+/* Short landscape phones: the shell, the speech and the POI field cannot all
+   fit in ~360px of height, so instead of squeezing the card to nothing (which
+   made it overlap the input) the shell itself becomes the scroller and the
+   card keeps a readable minimum height. */
+.app-container[data-tier="mobile"][data-orientation="landscape"] {
+  --layout-gutter-top: max(2.5rem, env(safe-area-inset-top));
+  --layout-textarea-height: 72px;
+  --layout-textarea-min-height: 60px;
+  --layout-textarea-max-height: 88px;
+  overflow-y: auto;
+}
+.app-container[data-tier="mobile"][data-orientation="landscape"] .left-pane {
+  /* Take the card's own height instead of shrinking to nothing, so the card
+     can never spill over the POI field. */
+  flex: 0 0 auto;
+}
+.app-container[data-tier="mobile"][data-orientation="landscape"] .prompt-card {
+  flex: 0 1 auto;
+  min-height: 120px;
+  /* 42% of the visible screen, corrected for the zoom factor. */
+  max-height: calc(42dvh / var(--ui-scale));
+}
+body[data-tier="mobile"] .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
+body[data-tier="mobile"] .settings-btn { width: 44px; height: 44px; }
+body[data-tier="mobile"] .settings-menu { width: min(260px, calc(100vw - 24px)); right: -4px; }
+body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+
+/* Pre-hydration fallback: without JS the attribute is absent, so keep the
+   page scrollable on phone-sized viewports rather than trapping content. */
+@media (max-width: 640px) {
+  body:not([data-tier]) { align-items: flex-start; }
 }
 
 @media (pointer: coarse) {
