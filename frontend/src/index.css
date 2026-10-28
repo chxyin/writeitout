@@ -1150,17 +1150,45 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .card-title { font-size: 1.4rem; font-weight: 900; text-align: center; margin-bottom: 0.5rem; }
 
 /* ---------- Settings card ---------- */
-.splash-screen .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+/* Reps carries seven segments now, so the row is allowed to wrap: on a narrow
+   card the control drops under its label instead of overflowing, and the control
+   itself wraps rather than pushing out through the card's padding. */
+.splash-screen .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .splash-screen .setting-label { font-size: 0.9rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 
-.splash-screen .segmented-control { display: flex; background: rgba(0, 0, 0, 0.4); border-radius: 10px; padding: 3px; gap: 3px; }
+/* The picker plus the box a Custom segment reveals, kept on one line and pushed
+   to the right edge the way the bare picker used to be. */
+.splash-screen .setting-control {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 0.5rem; flex-wrap: wrap; margin-left: auto;
+}
+
+.splash-screen .segmented-control {
+  display: flex; flex-wrap: wrap;
+  background: rgba(0, 0, 0, 0.4); border-radius: 10px; padding: 3px; gap: 3px;
+}
 .splash-screen .seg-btn {
-  background: transparent; border: none; border-radius: 8px; padding: 0.4rem 0.8rem;
+  background: transparent; border: none; border-radius: 8px; padding: 0.4rem 0.7rem;
   font-family: inherit; font-size: 0.8rem; font-weight: 800;
   color: rgba(255, 255, 255, 0.5); cursor: pointer; transition: all 0.2s;
 }
 .splash-screen .seg-btn.active { background: var(--splash-accent); color: #fff; box-shadow: 0 4px 10px rgba(255, 149, 0, 0.3); }
 .splash-screen .seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+/* The number box a Custom segment swaps in: the same dark slab as the picker
+   beside it, so the row keeps one visual weight. The native spinner is left
+   alone — it is the only affordance that says "type a number here" on desktop. */
+.splash-screen .seg-input {
+  width: 5rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-family: inherit; font-size: 0.8rem; font-weight: 800;
+  text-align: center;
+}
+.splash-screen .seg-input:focus { outline: 2px solid var(--splash-accent); outline-offset: 1px; border-color: transparent; }
 
 .splash-screen .play-btn {
   background: var(--splash-red);
@@ -1247,19 +1275,20 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .score-mid { color: var(--splash-accent); background: rgba(255, 149, 0, 0.15); }
 .splash-screen .score-low { color: var(--splash-red); background: rgba(255, 59, 48, 0.15); }
 
-/* First-run state of the list: the same dark slab as a row, but italic and
-   centred, so an empty history reads as a message rather than a broken row. */
+/* First-run state of the list: a light translucent slab, italic and centred, so
+   an empty history reads as a message rather than as a broken row. Dashed on
+   purpose — it is a slot waiting to be filled. */
 .splash-screen .history-empty {
   margin: 0;
   padding: 0.75rem 1rem;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px dashed rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
   font-size: 0.8rem;
   font-style: italic;
   line-height: 1.4;
   text-align: center;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.65);
   flex-shrink: 0;
 }
 
@@ -1283,6 +1312,11 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 
   .splash-screen.is-logged-in .right-panel { order: 2; width: 100%; max-width: 480px; justify-content: center; }
   .splash-screen.is-logged-in .auth-card { order: 3; width: 100%; max-width: 480px; }
+
+  /* Seven rep segments on a phone-width card: tighten them a notch so the row
+     stays on one line, and let the card's own padding be the outer margin. */
+  .splash-screen .seg-btn { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
+  .splash-screen .seg-input { width: 4.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

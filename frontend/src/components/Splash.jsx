@@ -9,22 +9,35 @@ import { loadSessionHistory } from '../lib/sessionHistory.js';
 // src/assets stays the single source of truth.
 import logoMarkup from '../assets/writeitout.svg?raw';
 
-// Splash screen values. Reps comes from the segmented picker (∞ is stored as
-// Infinity, which App.jsx treats as a session with no end); the timer is the
-// per-rep countdown in seconds, 0 meaning off.
+// Splash screen values. Reps is the session length and the timer is the per-rep
+// countdown in seconds, 0 meaning off — a session starts with no clock, and the
+// game draws no countdown chip, until a timer segment is picked. Both pickers end
+// in a "Custom" segment that swaps in a number box; what Play hands over is always
+// the number, never the segment's label.
+const CUSTOM = 'custom';
+
 const REPS_OPTIONS = [
-  { value: 5, label: '5' },
+  { value: 4, label: '4' },
+  { value: 6, label: '6' },
+  { value: 8, label: '8' },
   { value: 10, label: '10' },
-  { value: 20, label: '20' },
-  { value: Infinity, label: '∞' }
+  { value: 12, label: '12' },
+  { value: 14, label: '14' },
+  { value: CUSTOM, label: 'Custom' }
 ];
 
 const TIMER_OPTIONS = [
-  { value: 0, label: 'Off' },
   { value: 15, label: '15s' },
   { value: 30, label: '30s' },
-  { value: 60, label: '60s' }
+  { value: 45, label: '45s' },
+  { value: CUSTOM, label: 'Custom' }
 ];
+
+// Bounds for the custom box. One is the floor because a session of no reps is not
+// a session, and the caps stop a typed typo from drawing a progress bar with
+// thousands of segments in it.
+const REPS_RANGE = { min: 1, max: 100 };
+const TIMER_RANGE = { min: 1, max: 600 };
 
 // Same thresholds as the feedback card: 7+ green, 5-6 orange, below that red.
 function scoreTone(score) {
@@ -59,12 +72,56 @@ function SegmentedControl({ label, options, value, onChange }) {
   );
 }
 
+/**
+ * The number box behind a "Custom" segment. It owns the text it is typed into, so
+ * clearing it or typing through "1" on the way to "12" never fights the caret, and
+ * it reports every whole number it holds. An empty or half-typed box reports
+ * nothing, which leaves the last good number in place for Play to hand over; on
+ * blur the box snaps back to that number, so what is shown is what will be used.
+ */
+function CustomNumberBox({ label, value, min, max, onCommit }) {
+  const [text, setText] = useState(String(value));
+
+  const handleChange = (event) => {
+    const next = event.target.value;
+    setText(next);
+    const parsed = Number(next);
+    if (!next.trim() || !Number.isInteger(parsed)) return;
+    // Clamped rather than rejected: 0 reps or a 9,999-segment progress bar are
+    // both worse than quietly landing on the nearest usable number.
+    onCommit(Math.min(max, Math.max(min, parsed)));
+  };
+
+  return (
+    <input
+      className="seg-input"
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      step={1}
+      aria-label={`Custom ${label}`}
+      value={text}
+      onChange={handleChange}
+      onBlur={() => setText(String(value))}
+    />
+  );
+}
+
 export default function Splash({ onStart, animOn = true, lowIntensity = false }) {
   // Stand-in for the real Supabase session (handoff item 3). Sign In flips it, so
   // both states of the mock are reachable; Sign Out puts it back.
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [reps, setReps] = useState(5);
-  const [timer, setTimer] = useState(0);
+  // What Play will hand over. The numbers live here whichever segment is showing,
+  // so a typed pick and a preset pick are the same thing to App.jsx.
+  const [selectedReps, setSelectedReps] = useState(10);
+  const [selectedTimer, setSelectedTimer] = useState(0);
+  // Which row is sitting on its Custom segment. Kept apart from the numbers,
+  // because a value alone cannot say whether "10" came from the preset or from the
+  // box; a row that leaves Custom keeps the last typed number, so clicking between
+  // the two never loses it.
+  const [repsCustom, setRepsCustom] = useState(false);
+  const [timerCustom, setTimerCustom] = useState(false);
   // Recent Sessions, written by App.jsx when a session finishes. Read straight
   // into state — the splash is mounted afresh on every page load, so there is
   // nothing to wait for — and then kept in step through the `storage` event,
@@ -77,9 +134,22 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
     return () => window.removeEventListener('storage', syncFromStorage);
   }, []);
 
+  // A preset segment writes its own number; Custom only flips the row over to the
+  // box, leaving whatever number was already there until the box reports a new one.
+  const chooseReps = (value) => {
+    setRepsCustom(value === CUSTOM);
+    if (value !== CUSTOM) setSelectedReps(value);
+  };
+
+  const chooseTimer = (value) => {
+    setTimerCustom(value === CUSTOM);
+    if (value !== CUSTOM) setSelectedTimer(value);
+  };
+
   // Play hands the whole configuration to App.jsx in one object, so the game
-  // never has to know how the splash stores its state.
-  const handleStart = () => onStart({ reps, timer });
+  // never has to know how the splash stores its state. Both values are plain
+  // numbers by now — the Custom segment only contributes through its box.
+  const handleStart = () => onStart({ reps: selectedReps, timer: selectedTimer });
 
   return (
     // is-logged-in / is-logged-out is what lets the mobile block stack the cards
@@ -128,11 +198,43 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
 
             <div className="setting-row">
               <div className="setting-label">Reps</div>
-              <SegmentedControl label="Reps" options={REPS_OPTIONS} value={reps} onChange={setReps} />
+              <div className="setting-control">
+                <SegmentedControl
+                  label="Reps"
+                  options={REPS_OPTIONS}
+                  value={repsCustom ? CUSTOM : selectedReps}
+                  onChange={chooseReps}
+                />
+                {repsCustom && (
+                  <CustomNumberBox
+                    label="reps"
+                    value={selectedReps}
+                    min={REPS_RANGE.min}
+                    max={REPS_RANGE.max}
+                    onCommit={setSelectedReps}
+                  />
+                )}
+              </div>
             </div>
             <div className="setting-row">
               <div className="setting-label">Timer</div>
-              <SegmentedControl label="Timer" options={TIMER_OPTIONS} value={timer} onChange={setTimer} />
+              <div className="setting-control">
+                <SegmentedControl
+                  label="Timer"
+                  options={TIMER_OPTIONS}
+                  value={timerCustom ? CUSTOM : selectedTimer}
+                  onChange={chooseTimer}
+                />
+                {timerCustom && (
+                  <CustomNumberBox
+                    label="seconds per rep"
+                    value={selectedTimer}
+                    min={TIMER_RANGE.min}
+                    max={TIMER_RANGE.max}
+                    onCommit={setSelectedTimer}
+                  />
+                )}
+              </div>
             </div>
 
             {isLoggedIn && (
@@ -140,7 +242,7 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
                 <div className="history-title">Recent Sessions</div>
                 <div className="history-list">
                   {recentSessions.length === 0 ? (
-                    <p className="history-empty">No recent sessions yet. Play a game to see your history!</p>
+                    <p className="history-empty">No past practices</p>
                   ) : (
                     recentSessions.map((session, index) => (
                       // Nothing in a stored entry is unique — two sessions can share
