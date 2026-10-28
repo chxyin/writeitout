@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
+import { decodeGoogleCredential, GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
 // inside the file is blocked and "writeitout" would fall back to a system
@@ -109,9 +111,16 @@ function CustomNumberBox({ label, value, min, max, onCommit }) {
 }
 
 export default function Splash({ onStart, animOn = true, lowIntensity = false }) {
-  // Stand-in for the real Supabase session (handoff item 3). Sign In flips it, so
-  // both states of the mock are reachable; Sign Out puts it back.
+  // The Google session. `user` is the decoded ID token (name, email, picture);
+  // `isLoggedIn` is kept beside it rather than derived from it on purpose — a
+  // credential that arrives but cannot be decoded still signs the delegate in,
+  // and the profile card then falls back to the lettered avatar. Nothing is
+  // persisted, so a reload starts signed out.
+  const [user, setUser] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // The one line under the button when Google reports a failure. Cleared on the
+  // next attempt, so a stale error never sits next to a working button.
+  const [authError, setAuthError] = useState('');
   // What Play will hand over. The numbers live here whichever segment is showing,
   // so a typed pick and a preset pick are the same thing to App.jsx.
   const [selectedReps, setSelectedReps] = useState(10);
@@ -146,10 +155,45 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
     if (value !== CUSTOM) setSelectedTimer(value);
   };
 
+  // Google hands back a signed ID token (a JWT) rather than a profile, so the
+  // claims are decoded here. The sign-in counts either way: if the token cannot
+  // be read the card shows its fallback avatar and "Delegate" instead of
+  // pretending the delegate is signed out.
+  const handleLoginSuccess = ({ credential }) => {
+    setUser(decodeGoogleCredential(credential));
+    setIsLoggedIn(true);
+    setAuthError('');
+  };
+
+  const handleLoginError = () => {
+    setUser(null);
+    setIsLoggedIn(false);
+    setAuthError('Google sign-in did not finish. Please try again.');
+  };
+
+  // Signing out drops the profile and the flag together, then asks Google to
+  // forget the account as well. That call only reaches into the loaded GIS
+  // script, so it is guarded: signing out when Google's script never arrived
+  // must still sign the delegate out of this app.
+  const handleSignOut = () => {
+    setUser(null);
+    setIsLoggedIn(false);
+    setAuthError('');
+    try {
+      googleLogout();
+    } catch {
+      // GIS is not on the page — there is nothing to clear on Google's side.
+    }
+  };
+
   // Play hands the whole configuration to App.jsx in one object, so the game
   // never has to know how the splash stores its state. Both values are plain
   // numbers by now — the Custom segment only contributes through its box.
   const handleStart = () => onStart({ reps: selectedReps, timer: selectedTimer });
+
+  // What the lettered avatar shows: the delegate's initial once the name is
+  // known, and the mock's "D" when there is no profile at all.
+  const avatarLetter = (user?.name || 'D').trim().charAt(0).toUpperCase() || 'D';
 
   return (
     // is-logged-in / is-logged-out is what lets the mobile block stack the cards
@@ -165,13 +209,31 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
             <div className="glass-card auth-card">
               <div className="user-row">
                 <div className="user-info">
-                  <div className="avatar">D</div>
+                  {/* The account photo Google returns with the token. A missing or
+                      unreadable token leaves `user` null, and the card falls back
+                      to the same lettered avatar the mock had. */}
+                  {user?.picture ? (
+                    <img
+                      className="avatar"
+                      src={user.picture}
+                      alt={user.name || 'Google account'}
+                      width="44"
+                      height="44"
+                      // Google's photo host 403s a request that arrives with a
+                      // referrer from a site it does not know.
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="avatar" aria-hidden="true">
+                      {avatarLetter}
+                    </div>
+                  )}
                   <div className="user-text">
-                    <span className="user-name">Delegate</span>
-                    <span className="user-level">Level 4 • 650 XP</span>
+                    <span className="user-name">{user?.name || 'Delegate'}</span>
+                    {user?.email && <span className="user-email">{user.email}</span>}
                   </div>
                 </div>
-                <button type="button" className="logout-btn" onClick={() => setIsLoggedIn(false)}>
+                <button type="button" className="logout-btn" onClick={handleSignOut}>
                   Sign Out
                 </button>
               </div>
@@ -179,15 +241,33 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
           ) : (
             <div className="glass-card auth-card">
               <div className="auth-subtitle">Sign in to save your progress and streaks</div>
-              <button type="button" className="auth-btn" onClick={() => setIsLoggedIn(true)}>
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M22.56 12.25C22.56 11.47 22.49 10.72 22.36 10H12V14.26H17.92C17.67 15.63 16.86 16.79 15.69 17.57V20.34H19.26C21.35 18.42 22.56 15.6 22.56 12.25Z" fill="#4285F4" />
-                  <path d="M12 23C14.97 23 17.46 22.02 19.26 20.34L15.69 17.57C14.71 18.23 13.47 18.63 12 18.63C9.16 18.63 6.75 16.71 5.88 14.13H2.21V16.97C4.01 20.54 7.7 23 12 23Z" fill="#34A853" />
-                  <path d="M5.88 14.13C5.66 13.47 5.54 12.76 5.54 12C5.54 11.24 5.66 10.53 5.88 9.87V7.03H2.21C1.48 8.49 1.04 10.19 1.04 12C1.04 13.81 1.48 15.51 2.21 16.97L5.88 14.13Z" fill="#FBBC05" />
-                  <path d="M12 5.38C13.62 5.38 15.06 5.94 16.21 7.03L19.34 3.9C17.46 2.15 14.97 1 12 1C7.7 1 4.01 3.46 2.21 7.03L5.88 9.87C6.75 7.29 9.16 5.38 12 5.38Z" fill="#EA4335" />
-                </svg>
-                Continue with Google
-              </button>
+              {/* Google draws its own button inside an iframe, so it cannot be
+                  restyled from here — the wrapper gives it the card's width and
+                  the same rounded corners as the app's other buttons. The button
+                  is only mounted when a client ID exists, because Google's script
+                  throws on an empty one rather than failing quietly. */}
+              {GOOGLE_CLIENT_ID ? (
+                <div className="google-login-wrap">
+                  <GoogleLogin
+                    onSuccess={handleLoginSuccess}
+                    onError={handleLoginError}
+                    theme="filled_black"
+                    shape="rectangular"
+                    size="large"
+                    text="continue_with"
+                    width="380"
+                  />
+                </div>
+              ) : (
+                <p className="auth-error" role="alert">
+                  Google sign-in is not configured for this build.
+                </p>
+              )}
+              {authError && (
+                <p className="auth-error" role="alert">
+                  {authError}
+                </p>
+              )}
             </div>
           )}
         </div>

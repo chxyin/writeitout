@@ -36,6 +36,12 @@ jobs:
         run: npm ci
 
       - name: Build
+        # Google Sign-In reads its client ID at build time. Set the value as a
+        # repository secret (Settings → Secrets and variables → Actions); a build
+        # without it still succeeds, it just ships a sign-in button that cannot
+        # complete a login.
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: Upload Pages artifact

@@ -1211,15 +1211,24 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .auth-card { padding: 1.2rem 1.5rem; gap: 0.8rem; }
 .splash-screen .auth-subtitle { font-size: 0.85rem; text-align: center; color: rgba(255, 255, 255, 0.7); margin-bottom: 0.5rem; }
 
-.splash-screen .auth-btn {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px; padding: 0.8rem; color: #fff;
-  font-family: inherit; font-size: 0.95rem; font-weight: 700;
-  cursor: pointer; transition: background 0.2s; width: 100%;
+/* Google draws its button inside its own iframe, so nothing inside it can be
+   restyled from here. The wrapper instead hands the iframe the full width of the
+   card and clips it to the same 10px corner the app's other buttons use; the
+   button itself renders in `filled_black`, which is the theme closest to the
+   glass card it sits on. */
+.splash-screen .google-login-wrap {
+  width: 100%; display: flex; justify-content: center;
+  overflow: hidden; border-radius: 10px;
 }
-.splash-screen .auth-btn:hover { background: rgba(255, 255, 255, 0.2); }
-.splash-screen .auth-btn svg { width: 20px; height: 20px; }
+.splash-screen .google-login-wrap > div { width: 100%; display: flex; justify-content: center; }
+.splash-screen .google-login-wrap iframe { width: 100% !important; max-width: 100%; border-radius: 10px; }
+
+/* Only rendered when Google refuses or drops the sign-in, so it takes no space
+   otherwise and clears itself on the next attempt. */
+.splash-screen .auth-error {
+  margin: 0; font-size: 0.8rem; line-height: 1.4; text-align: center;
+  color: var(--splash-red);
+}
 
 .splash-screen .user-row { display: flex; align-items: center; justify-content: space-between; }
 .splash-screen .user-info { display: flex; align-items: center; gap: 12px; }
@@ -1231,9 +1240,19 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   font-size: 1.2rem; font-weight: 900;
   box-shadow: 0 4px 10px rgba(255, 149, 0, 0.4);
 }
-.splash-screen .user-text { display: flex; flex-direction: column; }
-.splash-screen .user-name { font-size: 1rem; font-weight: 800; }
-.splash-screen .user-level { font-size: 0.75rem; color: var(--splash-accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+/* The Google account photo wears the same 44px circle as the lettered fallback,
+   so the row does not move between a signed-in photo and a missing one.
+   object-fit keeps a non-square picture from stretching inside it. */
+.splash-screen img.avatar {
+  object-fit: cover; display: block;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+.splash-screen .user-text { display: flex; flex-direction: column; min-width: 0; }
+/* A long Google name or address is cut with an ellipsis rather than pushing the
+   Sign Out button out through the card's padding. */
+.splash-screen .user-name { font-size: 1rem; font-weight: 800; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.splash-screen .user-email { max-width: 200px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .splash-screen .logout-btn {
   background: transparent; border: 1px solid rgba(255, 255, 255, 0.2);
