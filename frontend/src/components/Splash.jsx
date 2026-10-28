@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PaperBackground from './PaperBackground.jsx';
+import { loadSessionHistory } from '../lib/sessionHistory.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
 // inside the file is blocked and "writeitout" would fall back to a system
@@ -25,21 +26,16 @@ const TIMER_OPTIONS = [
   { value: 60, label: '60s' }
 ];
 
-// Placeholder for the logged-in "Recent Sessions" list until sessions are stored
-// (handoff item: save the score and topic when a session finishes).
-const RECENT_SESSIONS = [
-  { id: 1, topic: 'AI Governance', date: 'Yesterday', score: 8 },
-  { id: 2, topic: 'Maritime Piracy', date: 'Oct 22', score: 6 },
-  { id: 3, topic: 'Nuclear Deterrence', date: 'Oct 20', score: 9 },
-  { id: 4, topic: 'Water Crisis', date: 'Oct 18', score: 4 },
-  { id: 5, topic: 'Human Trafficking', date: 'Oct 15', score: 8 }
-];
-
 // Same thresholds as the feedback card: 7+ green, 5-6 orange, below that red.
 function scoreTone(score) {
   if (score >= 7) return 'score-high';
   if (score >= 5) return 'score-mid';
   return 'score-low';
+}
+
+/** 8 → "8", 7.4 → "7.4". A session's average is not always a whole number. */
+function formatScore(score) {
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
 function SegmentedControl({ label, options, value, onChange }) {
@@ -63,38 +59,27 @@ function SegmentedControl({ label, options, value, onChange }) {
   );
 }
 
-/**
- * One label + switch row. The <input> stays in the DOM (hidden by
- * `.splash-screen input[type="checkbox"]`) because the visible switch is drawn by
- * `.toggle-switch` and its `:checked + .toggle-switch` state — so the input has to
- * be the switch's immediate previous sibling, and clicking anywhere in the label
- * toggles it natively.
- */
-function ToggleRow({ label, checked, onChange }) {
-  return (
-    <label className="toggle-row">
-      <span className="toggle-label">{label}</span>
-      <input type="checkbox" checked={checked} onChange={() => onChange(!checked)} />
-      <div className="toggle-switch" aria-hidden="true" />
-    </label>
-  );
-}
-
-
 export default function Splash({ onStart, animOn = true, lowIntensity = false }) {
   // Stand-in for the real Supabase session (handoff item 3). Sign In flips it, so
   // both states of the mock are reachable; Sign Out puts it back.
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [reps, setReps] = useState(5);
   const [timer, setTimer] = useState(0);
-  const [streak, setStreak] = useState(false);
-  const [hints, setHints] = useState(true);
-  const [sound, setSound] = useState(true);
-  const [shake, setShake] = useState(true);
+  // Recent Sessions, written by App.jsx when a session finishes. Read straight
+  // into state — the splash is mounted afresh on every page load, so there is
+  // nothing to wait for — and then kept in step through the `storage` event,
+  // which is what fires when another tab saves a session.
+  const [recentSessions, setRecentSessions] = useState(loadSessionHistory);
+
+  useEffect(() => {
+    const syncFromStorage = () => setRecentSessions(loadSessionHistory());
+    window.addEventListener('storage', syncFromStorage);
+    return () => window.removeEventListener('storage', syncFromStorage);
+  }, []);
 
   // Play hands the whole configuration to App.jsx in one object, so the game
   // never has to know how the splash stores its state.
-  const handleStart = () => onStart({ reps, timer, streak, hints, sound, shake });
+  const handleStart = () => onStart({ reps, timer });
 
   return (
     // is-logged-in / is-logged-out is what lets the mobile block stack the cards
@@ -150,24 +135,25 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
               <SegmentedControl label="Timer" options={TIMER_OPTIONS} value={timer} onChange={setTimer} />
             </div>
 
-            <div className="divider" />
-
-            <ToggleRow label="🔥 Streak Mode" checked={streak} onChange={setStreak} />
-            <ToggleRow label="💡 Show Hints" checked={hints} onChange={setHints} />
-            <ToggleRow label="🔊 Sound" checked={sound} onChange={setSound} />
-            <ToggleRow label="📳 Screen Shake" checked={shake} onChange={setShake} />
-
             {isLoggedIn && (
               <div className="history-section">
                 <div className="history-title">Recent Sessions</div>
                 <div className="history-list">
-                  {RECENT_SESSIONS.map((session) => (
-                    <div className="history-item" key={session.id}>
-                      <span className="history-topic">{session.topic}</span>
-                      <span className="history-date">{session.date}</span>
-                      <span className={`history-score ${scoreTone(session.score)}`}>{session.score}/10</span>
-                    </div>
-                  ))}
+                  {recentSessions.length === 0 ? (
+                    <p className="history-empty">No recent sessions yet. Play a game to see your history!</p>
+                  ) : (
+                    recentSessions.map((session, index) => (
+                      // Nothing in a stored entry is unique — two sessions can share
+                      // a topic, a score and a date — so the row's position keys it.
+                      <div className="history-item" key={`${session.date}-${index}`}>
+                        <span className="history-topic">{session.topic}</span>
+                        <span className="history-date">{session.date}</span>
+                        <span className={`history-score ${scoreTone(session.score)}`}>
+                          {formatScore(session.score)}/10
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}

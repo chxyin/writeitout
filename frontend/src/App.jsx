@@ -11,9 +11,11 @@ import {
   formattingVars
 } from './lib/formatting.js';
 import PaperBackground from './components/PaperBackground.jsx';
-// The game header's brand mark. Inlined for the same reason as the splash hero
-// logo (see Splash.jsx): an <img> would lose the SVG's Inter 900 lettering.
-import wordmarkMarkup from './assets/writeitout_transparent.svg?raw';
+// The game header's mark: the standalone paper icon, not the wordmark. It is
+// shapes only (no embedded <style>/font like the logos carry), so a plain <img>
+// renders it exactly as drawn and the browser can cache the file.
+import appIcon from './assets/writeitout_icon.svg';
+import { saveSessionResult } from './lib/sessionHistory.js';
 import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
@@ -128,10 +130,9 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(0);
 
   // View routing. The splash screen collects the practice settings; the game view
-  // is the drill loop below. gameSettings is what Play handed over —
-  // { reps, timer, streak, hints, sound, shake } — or null before the first
-  // session. Only reps and timer are wired so far; the four toggles are carried
-  // along for the features the handoff still lists (streak, hints, sound, shake).
+  // is the drill loop below. gameSettings is what Play handed over — { reps, timer }
+  // — or null before the first session: reps is the session length, timer the
+  // per-rep countdown.
   const [currentView, setCurrentView] = useState('splash');
   const [gameSettings, setGameSettings] = useState(null);
 
@@ -390,6 +391,27 @@ export default function App() {
     }
   };
 
+  /**
+   * Closes out a finished session: records it for the splash screen's Recent
+   * Sessions list, then shows the completion card. The score is the average of
+   * the reps that were actually graded, and the topic stays a single line — a
+   * session usually mixes several, so those are labelled by how many it covered
+   * rather than by an arbitrary first one.
+   */
+  const completeSession = () => {
+    const graded = history.filter((entry) => entry.feedback);
+    if (graded.length) {
+      const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
+      const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+      saveSessionResult({
+        topic: topics.length === 1 ? topics[0] : `${topics.length} topics`,
+        // One decimal: the list shows "7.4/10", and a whole average stays "8".
+        score: Math.round((total / graded.length) * 10) / 10
+      });
+    }
+    setSessionComplete(true);
+  };
+
   // Next > : walk forward through saved reps, and only fetch a new drill once the
   // user is standing on the last one (Dr. Frost's "end of the timeline").
   const handleNext = () => {
@@ -398,7 +420,7 @@ export default function App() {
       return;
     }
     if (gradedCount >= sessionLength) {
-      setSessionComplete(true);
+      completeSession();
       return;
     }
     startNewRep();
@@ -495,10 +517,10 @@ export default function App() {
         {/* Top band: progress + mode toggle, never shrinks and never scrolls. */}
         <div className="app-top">
           <div className="progress-bar stagger-in stagger-1">
-            {/* Brand mark: the wordmark inlined (see the import) so its Inter 900
-                lettering and its own <style> survive. Decorative here — the page
-                title already carries the name. */}
-            <span className="app-logo" aria-hidden="true" dangerouslySetInnerHTML={{ __html: wordmarkMarkup }} />
+            {/* Brand mark: the paper icon at the head of the progress row. A plain
+                <img> with its own box, so it never stretches or shifts the
+                segments. Decorative — the page title already carries the name. */}
+            <img className="app-logo" src={appIcon} alt="" width="24" height="24" aria-hidden="true" />
             <div
               className="progress-segments"
               role="progressbar"

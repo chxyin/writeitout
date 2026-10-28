@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 15 90 105" width="100%" height="100%">
+  <!-- The paper mark on its own: white sheet, folded corner, three lines. Same
+       artwork as public/favicon.svg (the tab icon) — that copy has to stay a
+       stable URL, so this one is the app's importable twin. Keep them together. -->
+  <g transform="translate(58.5, 66.5) rotate(-10) translate(-58.5, -66.5)">
+    <!-- Paper Base -->
+    <rect x="31" y="31" width="55" height="71" rx="5" fill="#FFFFFF" />
+
+    <!-- Folded Corner (Rounded) -->
+    <path d="M 69 102 L 81 102 Q 86 102 86 97 L 86 85 Z" fill="#E8E8E8" />
+    <path d="M 69 102 L 86 85 L 86 97 Q 86 102 81 102 Z" fill="#D0D0D0" />
+
+    <!-- The 3 Lines -->
+    <rect x="41" y="45" width="28" height="5" rx="2.5" fill="#2B5CE6" />
+    <rect x="41" y="54" width="20" height="5" rx="2.5" fill="#FF9500" />
+    <rect x="41" y="63" width="14" height="5" rx="2.5" fill="#2B5CE6" />
+  </g>
+</svg>
