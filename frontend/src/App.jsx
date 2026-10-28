@@ -13,18 +13,36 @@ const BACKGROUNDS = [
   { id: 'plain', label: 'Plain' }
 ];
 
-const API_BASE_URL = 'https://writeitout-backend.vercel.app';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV
+    ? 'http://127.0.0.1:8000'
+    : 'https://writeitout-backend.vercel.app');
+
+function describeApiError(data, status) {
+  const detail = data && data.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => item && item.msg).filter(Boolean);
+    if (messages.length) return messages.join(' ');
+  }
+  if (status === 429) return 'The chair is busy. Please wait a moment and try again.';
+  return `The chair could not grade that POI (error ${status}). Please try again.`;
+}
 
 export default function App() {
   const [currentDrill, setCurrentDrill] = useState(null);
   const [loadingDrill, setLoadingDrill] = useState(true);
   const [drillError, setDrillError] = useState('');
+  const [repCount, setRepCount] = useState(0);
+  const [sessionComplete, setSessionComplete] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' or 'full'
   const [poi, setPoi] = useState('');
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [formExiting, setFormExiting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   
   // Settings State
   const [showMenu, setShowMenu] = useState(false);
@@ -124,15 +142,28 @@ export default function App() {
   const isOverLimit = wordCount > 40;
 
   const handleSubmit = async () => {
-    if (!currentDrill || !poi || isOverLimit) return;
+    if (!currentDrill || !poi || isOverLimit || loading) return;
     setLoading(true);
+    setSubmitError('');
     try {
       const response = await fetch(`${API_BASE_URL}/api/grade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speech: activePrompt, poi: poi })
+        body: JSON.stringify({
+          speech: currentDrill.full_speech,
+          poi: poi,
+          is_solutions_only: mode === 'single'
+        })
       });
-      const data = await response.json();
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(describeApiError(data, response.status));
+      }
+      if (!data || typeof data.score !== 'number') {
+        throw new Error('The chair returned an unexpected response. Please try again.');
+      }
+
       setFeedback(data);
       setFormExiting(true);
       if (exitTimer.current) clearTimeout(exitTimer.current);
@@ -140,8 +171,8 @@ export default function App() {
         setShowFeedback(true);
         setFormExiting(false);
       }, 300);
-    } catch {
-      alert("Error connecting to Chair API.");
+    } catch (error) {
+      setSubmitError(error.message || 'Error connecting to Chair API.');
     } finally {
       setLoading(false);
     }
@@ -152,6 +183,24 @@ export default function App() {
     setShowFeedback(false);
     setFormExiting(false);
     setPoi('');
+    setSubmitError('');
+    const nextRepCount = repCount + 1;
+    setRepCount(nextRepCount);
+    if (nextRepCount >= 5) {
+      setSessionComplete(true);
+      return;
+    }
+    fetchRandomDrill();
+  };
+
+  const handleStartSession = () => {
+    setRepCount(0);
+    setSessionComplete(false);
+    setFeedback(null);
+    setShowFeedback(false);
+    setFormExiting(false);
+    setPoi('');
+    setSubmitError('');
     fetchRandomDrill();
   };
 
@@ -222,42 +271,74 @@ export default function App() {
 
       <div className="paper-container" id="paper-container"></div>
 
-      <div className="app-container">
-        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: loadingDrill ? '35%' : '100%' }}></div></div>
+      <div className={`app-container mode-${mode}`}>
+        <div className="progress-bar stagger-in stagger-1"><div className="progress-fill" style={{ width: `${(repCount / 5) * 100}%` }}></div></div>
+        <div className="toggle-container stagger-in stagger-2">
+          <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
+          <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
+            <div className="toggle-knob"></div>
+          </div>
+          <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
+        </div>
 
-        {!showFeedback ? (
-          <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
-            {loadingDrill && <div className="loading-message">Loading new speech...</div>}
-            {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
-            {!loadingDrill && !drillError && currentDrill && <>
-            <div className="toggle-container stagger-in stagger-2">
-              <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
-              <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
-                <div className="toggle-knob"></div>
-              </div>
-              <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Single Claim</span>
-            </div>
-
-            <div className="prompt-card stagger-in stagger-3">
-              <span className="prompt-tag">
-                <span>{currentDrill.topic}</span>
-                <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
-              </span>
-              "{activePrompt}"
-            </div>
-
-            <div className="poi-input-area stagger-in stagger-4">
-              <div className="input-label">
-                <span>Your POI</span>
-                <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
-              </div>
-              <textarea value={poi} onChange={(e) => setPoi(e.target.value)} placeholder="Type your Point of Information here..." />
-            </div>
-
-            <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
-              {loading ? 'Chair is Grading...' : 'Submit POI'}
+        {sessionComplete ? (
+          <div className="session-complete feedback-card">
+            <div className="feedback-score">5/5</div>
+            <div className="feedback-label">Session Complete</div>
+            <p>Great job! You completed 5 reps.</p>
+            <button className="next-btn" onClick={handleStartSession}>
+              Start New Session
             </button>
-            </>}
+          </div>
+        ) : !showFeedback ? (
+          <div className={`drill-form ${formExiting ? 'is-exiting' : ''}`}>
+            <div className="split-panes">
+              <div className="left-pane">
+                {loadingDrill && <div className="loading-message">Loading new speech...</div>}
+                {!loadingDrill && drillError && <div className="loading-message error-message">{drillError}</div>}
+                {!loadingDrill && !drillError && currentDrill && (
+                  <div className="prompt-card stagger-in stagger-3">
+                    <span className="prompt-tag">
+                      <span>{currentDrill.topic}</span>
+                      <span id="comm-text"> | {currentDrill.committee} - {currentDrill.delegate}</span>
+                    </span>
+                    <div className="prompt-scroll">"{activePrompt}"</div>
+                  </div>
+                )}
+              </div>
+
+              <div className="right-pane">
+                {!loadingDrill && !drillError && currentDrill && <>
+                  <div className="poi-input-area stagger-in stagger-4">
+                    <div className="input-label">
+                      <span>Your POI</span>
+                      <span className="word-counter" style={{ color: isOverLimit ? 'var(--accent-red)' : '' }}>{wordCount} / 40 words</span>
+                    </div>
+                    {mode === 'single' && (
+                      <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginBottom: '8px' }}>
+                        Your goal is to attack the funding, feasibility, or logic of these proposed solutions.
+                      </p>
+                    )}
+                    <textarea
+                      value={poi}
+                      onChange={(e) => {
+                        setPoi(e.target.value);
+                        if (submitError) setSubmitError('');
+                      }}
+                      placeholder="Type your Point of Information here..."
+                    />
+                  </div>
+
+                  {submitError && (
+                    <div className="submit-error" role="alert">{submitError}</div>
+                  )}
+
+                  <button className="submit-btn stagger-in stagger-5" onClick={handleSubmit} disabled={loading || !poi || isOverLimit}>
+                    {loading ? 'Chair is Grading...' : 'Submit POI'}
+                  </button>
+                </>}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="feedback-card">
