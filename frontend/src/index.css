@@ -53,9 +53,10 @@
   /* Formatting preferences (Settings → Formatting). App.jsx writes the live
      values onto <body> as --fmt-*, one per slider; the numbers below are the
      defaults used for the first paint, before React has read localStorage, and
-     must match the range defaults in src/lib/formatting.js. index.css reads them
-     only inside the desktop media query, so the tablet and mobile layouts ignore
-     them no matter what is stored. */
+     must match the range defaults in src/lib/formatting.js. Speech text size is
+     read by every tier; the two offsets and the card width only shape the
+     desktop shell, which is the only layout with a shell to offset or a card
+     column to narrow. */
   --fmt-top-offset: 10vh;
   --fmt-bottom-offset: 10vh;
   --fmt-speech-font-size: 1.1rem;
@@ -79,6 +80,11 @@ html,
 body {
   min-height: 100%;
   width: 100%;
+  /* iOS inflates type on rotation (and in tall blocks) unless text autosizing is
+     pinned. Every size in this app is set in rem, so letting Safari re-scale it
+     made the layout change shape when a phone was turned on its side. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -271,6 +277,9 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .setting-range:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 2px; }
 
 .app-container {
+  /* Speech type size is the one Formatting preference every tier can honour, so
+     it is mapped here rather than inside the desktop media query. */
+  --speech-font-size: var(--fmt-speech-font-size);
   position: relative;
   z-index: 1;
   width: 100%;
@@ -396,8 +405,13 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .toggle-knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
 .toggle-switch.active .toggle-knob { transform: translateX(22px); }
 
-.prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: 1.1rem; line-height: 1.5; position: relative; display: flex; flex-direction: column; min-height: 0; }
-.prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.prompt-card { background: var(--card-bg); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); padding: 1.5rem; border-radius: 16px; font-size: var(--speech-font-size); line-height: 1.5; position: relative; display: flex; flex-direction: column; min-height: 0; }
+/* The speeches carry their paragraph breaks as blank lines (every one in the
+   dataset is built that way). Without pre-wrap a div collapses them and a
+   three-paragraph speech reads as one wall of text — worst on a phone, where the
+   card is narrow. pre-wrap (not pre) still wraps long lines, so nothing scrolls
+   sideways. */
+.prompt-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; }
 /* The badge may wrap onto several lines on narrow panes, so cap its width to
    the card and give it a predictable line height for the space reserved below. */
 .prompt-tag { position: absolute; top: -12px; left: 20px; max-width: calc(100% - 40px); background: var(--accent-orange); color: white; font-size: 10px; font-weight: 800; line-height: 1.4; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; letter-spacing: 1px; }
@@ -702,7 +716,6 @@ textarea:focus {
        locked mobile shell untouched by these preferences. */
     --app-top-offset: var(--fmt-top-offset);
     --app-bottom-offset: var(--fmt-bottom-offset);
-    --speech-font-size: var(--fmt-speech-font-size);
     --speech-card-width: var(--fmt-card-width);
     /* The card width slider has to move the shell with it: Submit and the
        progress bar are as wide as the shell, so a card floating in a wider
@@ -732,7 +745,6 @@ textarea:focus {
     gap: var(--layout-gap);
   }
 
-  .app-container .prompt-card { font-size: var(--speech-font-size); }
   /* Only the single-column view has one card with slack around it; in full mode
      the split panes decide the width. */
   .app-container.mode-single .prompt-card {
@@ -925,7 +937,9 @@ body[data-tier="tablet"] .settings-menu { width: min(260px, calc(100vw - 32px));
 body[data-tier="mobile"] {
   align-items: flex-start;
   padding: 0;
-  height: 100dvh;
+  /* --app-viewport-height is the visible height from useViewportHeight: it
+     shrinks with the on-screen keyboard, which 100dvh does not. */
+  height: var(--app-viewport-height, 100dvh);
   overflow: hidden;
 }
 
@@ -942,8 +956,14 @@ body[data-tier="mobile"] {
   --layout-textarea-min-height: 92px;
   --layout-textarea-max-height: 140px;
   --layout-touch-target: 52px;
-  height: calc(100dvh / var(--ui-scale));
-  max-height: calc(100dvh / var(--ui-scale));
+  /* One visible screen, keyboard included. The height is divided by the zoom
+     factor because `zoom` multiplies the rendered box; the width is divided for
+     the same reason, so a zoomed-in shell cannot hang off the right edge of a
+     phone, where the page cannot scroll sideways to reach it. */
+  height: calc(var(--app-viewport-height, 100dvh) / var(--ui-scale));
+  min-height: calc(var(--app-viewport-height, 100dvh) / var(--ui-scale));
+  max-height: calc(var(--app-viewport-height, 100dvh) / var(--ui-scale));
+  width: calc(100% / var(--ui-scale));
   overflow: hidden;
   justify-content: flex-start;
 }
@@ -991,13 +1011,13 @@ body[data-tier="mobile"] {
 .app-container[data-tier="mobile"] .prompt-card {
   /* No max-height here: the card grows into whatever the flex parent leaves
      free, and the inner .prompt-scroll becomes the only scroller on screen.
-     The padding clears the topic badge, which can wrap to three lines. */
+     The padding clears the topic badge, which can wrap to three lines. The type
+     size comes from --speech-font-size, so the Formatting slider works here too. */
   height: auto;
   max-height: none;
   flex: 1 1 auto;
   min-height: 0;
   padding: 2.25rem 1.25rem 1.25rem;
-  font-size: 1rem;
 }
 .app-container[data-tier="mobile"] .prompt-scroll {
   flex: 1 1 auto;
@@ -1051,7 +1071,7 @@ body[data-tier="mobile"] {
   flex: 0 1 auto;
   min-height: 120px;
   /* 42% of the visible screen, corrected for the zoom factor. */
-  max-height: calc(42dvh / var(--ui-scale));
+  max-height: calc(0.42 * var(--app-viewport-height, 100dvh) / var(--ui-scale));
 }
 body[data-tier="mobile"] .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
 body[data-tier="mobile"] .settings-btn { width: 44px; height: 44px; }
@@ -1380,9 +1400,12 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 
   /* Six rep segments (and five timer ones) on a phone-width card: the label
      moves above its picker so the bar can use the card's whole width, and the
-     segments tighten a notch so the row stays on one line. */
+     segments tighten a notch so the row stays on one line. The control stops
+     growing on the cross axis — it is a row inside a column now, where a
+     flex-basis of 0 has nothing to grow into. */
   .splash-screen .setting-row { flex-direction: column; align-items: stretch; gap: 0.35rem; }
   .splash-screen .setting-label { flex: 0 0 auto; }
+  .splash-screen .setting-control { flex: 0 0 auto; }
   .splash-screen .seg-btn { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
   .splash-screen .seg-input { width: 4.5rem; }
 }

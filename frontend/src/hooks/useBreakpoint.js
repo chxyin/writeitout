@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react';
 
 // Device tiers used by the responsive layout.
-// mobile: <= 640px, tablet: 641-1024px, desktop: > 1024px.
-export const MOBILE_QUERY = '(max-width: 640px)';
+// mobile: <= 640px wide, or a short touch viewport — a phone on its side.
+// tablet: 641-1024px wide (and not a short touch viewport).
+// desktop: > 1024px.
+//
+// The short-viewport clause matters because a phone in landscape is wider than
+// it is tall: an 844x390 iPhone is 844px wide, which used to land it in the
+// tablet tier and give it the side-by-side panes meant for a tablet, while the
+// short-landscape rules in index.css (gated on the mobile tier) never ran at all.
+// `pointer: coarse` keeps a short desktop window on the desktop tier.
+export const MOBILE_QUERY = '(max-width: 640px), (max-height: 500px) and (pointer: coarse)';
 export const TABLET_QUERY = '(min-width: 641px) and (max-width: 1024px)';
 export const PORTRAIT_QUERY = '(orientation: portrait)';
 

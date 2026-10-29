@@ -37,9 +37,9 @@ export function clampValue(value, range) {
 }
 
 /**
- * The four custom properties App.jsx writes onto <body>. They are read only by
- * the desktop media query in index.css, so phones and tablets keep their own
- * layouts no matter what is stored here.
+ * The four custom properties App.jsx writes onto <body>. Speech text size is
+ * consumed by every tier; the two offsets and the card width only by the desktop
+ * layout, which is the one with a shell to offset and a card column to narrow.
  */
 export function formattingVars({ topOffset, bottomOffset, textSize, cardWidth }) {
   return {

@@ -21,6 +21,7 @@ import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
 import useBreakpoint from './hooks/useBreakpoint.js';
+import useViewportHeight from './hooks/useViewportHeight.js';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
@@ -177,6 +178,9 @@ export default function App() {
   // prompt and the POI field into two columns, phones get a single column.
   const { isMobile, isTablet, orientation } = useBreakpoint();
   const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
+  // Keeps the mobile shell one visible screen tall when the keyboard opens; the
+  // other tiers ignore the value it writes.
+  useViewportHeight();
 
   // The rep on screen is read straight out of the history, so the drill view and
   // the feedback view can never disagree about which rep is being looked at.

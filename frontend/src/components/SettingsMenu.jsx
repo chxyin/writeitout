@@ -223,8 +223,9 @@ export default function SettingsMenu({
                 onChange={onCardWidthChange}
               />
               <p className="settings-note">
-                Tap a value to reset it. Formatting applies to desktop layouts — phones keep
-                their own full-screen layout.
+                Tap a value to reset it. Speech text size applies on every screen;
+                the offsets and card width shape the desktop layout, where there is
+                a shell to offset and a card column to narrow.
               </p>
             </>
           )}
