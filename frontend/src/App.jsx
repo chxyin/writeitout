@@ -33,8 +33,10 @@ import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
+import SessionDetail from './components/SessionDetail.jsx';
 import useBreakpoint from './hooks/useBreakpoint.js';
 import useViewportHeight from './hooks/useViewportHeight.js';
+import useRoute from './lib/route.js';
 
 function describeApiError(data, status) {
   const detail = data && data.detail;
@@ -61,6 +63,15 @@ const GRADE_TIMEOUT_MS = 45_000;
 /** One rep in the history timeline. `feedback` stays null until it is graded. */
 function createRep(drill) {
   return { drill, poi: '', feedback: null };
+}
+
+/**
+ * The API caps every stored string, and a body that misses a cap is rejected
+ * whole — which would cost the rep, not just the sentence that was too long.
+ * Clipping here keeps the write valid; the limits match RepRequest in main.py.
+ */
+function clip(value, max) {
+  return typeof value === 'string' ? value.slice(0, max) : null;
 }
 
 const LAST_SESSION_STORAGE_KEY = 'writeitout:last-session';
@@ -186,6 +197,11 @@ export default function App() {
   // it as well: the request headers carry the credential and the history bucket
   // is keyed by the account id.
   const { session, signIn, signOut } = useAuthSession();
+
+  // The address bar is the router: the start screen is the root, a past session
+  // is #/session/<id>. Re-read on every hash change, so the back button and a
+  // deep link both land on the right screen.
+  const route = useRoute();
 
   // Verify the credential with the API as soon as Google hands it over. A token
   // can be well formed and still be rejected — expired, revoked, or minted for
@@ -590,6 +606,19 @@ export default function App() {
           score: data.score,
           timed_out: clockExpired,
           poi,
+          // The replay page is built from these: the speech exactly as it stood
+          // on screen, and the chair's whole verdict. The server redacts them
+          // under the delegate's opt-out, so this is only ever a request to keep
+          // them — not a decision.
+          prompt_text: clip(
+            mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech,
+            6000
+          ),
+          grade_label: clip(data.grade_label, 40),
+          reasoning: clip(data.reasoning, 2000),
+          constructive_feedback: clip(data.constructive_feedback, 2000),
+          rewritten_poi: clip(data.rewritten_poi, 4000),
+          rewrite_explanation: clip(data.rewrite_explanation, 2000),
           latency_ms: data.latency_ms ?? null,
           prompt_tokens: data.usage?.prompt_tokens ?? null,
           completion_tokens: data.usage?.completion_tokens ?? null,
@@ -814,6 +843,18 @@ export default function App() {
   // The splash screen replaces the whole shell — no gear, no papers of its own,
   // no progress bar: it is its own full-screen view with its own settings card.
   // Every hook above has already run, so this early return costs nothing.
+  if (route.name === 'session') {
+    return (
+      <SessionDetail
+        sessionId={route.id}
+        session={session}
+        onSignIn={handleSignIn}
+        animOn={animOn}
+        lowIntensity={lowIntensity}
+      />
+    );
+  }
+
   if (currentView === 'splash') {
     return (
       <Splash

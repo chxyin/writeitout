@@ -41,7 +41,13 @@ export default function FeedbackCard({
   initialShowOriginal = false,
   // The clock ran out and the POI went in as it stood. The card says so, because
   // a short answer would otherwise look like the delegate simply stopped.
-  timedOut = false
+  timedOut = false,
+  // Replay: the same card, after the session, with the actions renamed — there is
+  // nothing left to grade, only somewhere to go next.
+  frozen = false,
+  backLabel = '← Back',
+  nextLabel = 'Next Rep →',
+  nextDisabled = false
 }) {
   const [copied, setCopied] = useState(false);
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal);
@@ -66,7 +72,7 @@ export default function FeedbackCard({
   };
 
   return (
-    <div className="feedback-card app-middle">
+    <div className={`feedback-card app-middle ${frozen ? 'is-frozen' : ''}`.trim()}>
       {/* Everything above the footer scrolls on desktop; the footer is pinned to
           the bottom of the card so Back/Next never move between reps. */}
       <div className="feedback-body">
@@ -77,7 +83,9 @@ export default function FeedbackCard({
         )}
 
         <p><strong>Reasoning:</strong> {feedback.reasoning}</p>
-        <p><strong>Advice:</strong> {feedback.constructive_feedback}</p>
+        {feedback.constructive_feedback && (
+          <p><strong>Advice:</strong> {feedback.constructive_feedback}</p>
+        )}
 
         <div className="rewrite-box">
           <div className="rewrite-header">
@@ -117,10 +125,10 @@ export default function FeedbackCard({
         )}
         <div className="feedback-actions">
           <button className="back-btn" type="button" onClick={onBack}>
-            ← Back
+            {backLabel}
           </button>
-          <button className="next-btn" type="button" onClick={onNext}>
-            Next Rep →
+          <button className="next-btn" type="button" onClick={onNext} disabled={nextDisabled}>
+            {nextLabel}
           </button>
         </div>
       </div>

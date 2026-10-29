@@ -3,6 +3,7 @@ import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
 import { fetchHistory } from '../lib/practice.js';
+import { sessionHash } from '../lib/route.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
@@ -158,11 +159,16 @@ export default function Splash({
   // into state — the splash is mounted afresh on every page load, so there is
   // nothing to wait for — and then re-read whenever the account changes or another
   // tab saves a session (`storage`).
-  const [recentSessions, setRecentSessions] = useState(() => loadSessionHistory(session?.sub));
+  const [recentSessions, setRecentSessions] = useState(() =>
+    // Local entries only ever held a topic, a score and a date: there is no id to
+    // open, so they stay plain rows while the database's own sessions are links.
+    loadSessionHistory(session?.sub).map((entry) => ({ ...entry, id: '' }))
+  );
 
   useEffect(() => {
     let cancelled = false;
-    const syncFromStorage = () => setRecentSessions(loadSessionHistory(session?.sub));
+    const syncFromStorage = () =>
+      setRecentSessions(loadSessionHistory(session?.sub).map((entry) => ({ ...entry, id: '' })));
     syncFromStorage();
     window.addEventListener('storage', syncFromStorage);
 
@@ -175,6 +181,7 @@ export default function Splash({
         if (cancelled || !rows) return;
         setRecentSessions(
           rows.map((row) => ({
+            id: row.id || '',
             topic: row.topic || (row.completed ? 'Practice' : 'Ended early'),
             // An abandoned session has no average; show the dash, not a fake 0.
             score: Number.isFinite(row.score) ? row.score : null,
@@ -371,18 +378,36 @@ export default function Splash({
                   {recentSessions.length === 0 ? (
                     <p className="history-empty">No past practices</p>
                   ) : (
-                    recentSessions.map((session, index) => (
+                    recentSessions.map((entry, index) => {
                       // Nothing in a stored entry is unique — two sessions can share
                       // a topic, a score and a date — so the row's position keys it.
-                      <div className="history-item" key={`${session.date}-${index}`}>
-                        <span className="history-topic">{session.topic}</span>
-                        <span className="history-date">{session.date}</span>
-                        <span className={`history-score ${scoreTone(session.score)}`}>
-                          {formatScore(session.score)}
-                          {Number.isFinite(session.score) ? '/10' : ''}
-                        </span>
-                      </div>
-                    ))
+                      const key = entry.id || `${entry.date}-${index}`;
+                      const row = (
+                        <>
+                          <span className="history-topic">{entry.topic}</span>
+                          <span className="history-date">{entry.date}</span>
+                          <span className={`history-score ${scoreTone(entry.score)}`}>
+                            {formatScore(entry.score)}
+                            {Number.isFinite(entry.score) ? '/10' : ''}
+                          </span>
+                        </>
+                      );
+                      // A row with an id opens the session; a row without one came
+                      // from this browser's old list and has nothing behind it.
+                      return entry.id ? (
+                        <a
+                          className="history-item is-open"
+                          key={key}
+                          href={sessionHash(entry.id)}
+                          title="Open this session"
+                        >
+                          {row}
+                          <span className="history-open" aria-hidden="true">›</span>
+                        </a>
+                      ) : (
+                        <div className="history-item" key={key}>{row}</div>
+                      );
+                    })
                   )}
                 </div>
               </div>

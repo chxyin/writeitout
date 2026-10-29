@@ -113,10 +113,21 @@ class Store:
         prompt_tokens: int | None,
         completion_tokens: int | None,
         model: str | None,
+        prompt_text: str | None = None,
+        grade_label: str | None = None,
+        reasoning: str | None = None,
+        constructive_feedback: str | None = None,
+        rewritten_poi: str | None = None,
+        rewrite_explanation: str | None = None,
     ) -> None:
         raise NotImplementedError
 
     def list_sessions(self, sub: str, limit: int = 20) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def session_detail(self, sub: str, session_id: str) -> dict[str, Any] | None:
+        """One session and its reps in order, or None when it is not this
+        account's. The owner check is part of the query, not the caller's job."""
         raise NotImplementedError
 
     def import_sessions(self, sub: str, entries: Iterable[dict[str, Any]]) -> int:
@@ -272,6 +283,12 @@ class MemoryStore(Store):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         model: str | None,
+        prompt_text: str | None = None,
+        grade_label: str | None = None,
+        reasoning: str | None = None,
+        constructive_feedback: str | None = None,
+        rewritten_poi: str | None = None,
+        rewrite_explanation: str | None = None,
     ) -> None:
         keep_text = self.should_store_answers(sub)
         with self._lock:
@@ -288,6 +305,12 @@ class MemoryStore(Store):
                 "timed_out": timed_out,
                 "poi": poi if keep_text else None,
                 "poi_chars": poi_chars,
+                "prompt_text": prompt_text if keep_text else None,
+                "grade_label": grade_label if keep_text else None,
+                "reasoning": reasoning if keep_text else None,
+                "constructive_feedback": constructive_feedback if keep_text else None,
+                "rewritten_poi": rewritten_poi if keep_text else None,
+                "rewrite_explanation": rewrite_explanation if keep_text else None,
                 "latency_ms": latency_ms,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -314,6 +337,15 @@ class MemoryStore(Store):
             rows = [s for s in self._sessions.values() if s["user_sub"] == sub]
         rows.sort(key=lambda s: s["started_at"], reverse=True)
         return [dict(row) for row in rows[:limit]]
+
+    def session_detail(self, sub: str, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None or session["user_sub"] != sub:
+                return None
+            reps = [dict(r) for r in self._reps.values() if r["session_id"] == session_id]
+        reps.sort(key=lambda r: r["created_at"])
+        return {"session": dict(session), "reps": reps}
 
     def import_sessions(self, sub: str, entries: Iterable[dict[str, Any]]) -> int:
         imported = 0
@@ -539,22 +571,37 @@ class PostgresStore(Store):
         prompt_tokens: int | None,
         completion_tokens: int | None,
         model: str | None,
+        prompt_text: str | None = None,
+        grade_label: str | None = None,
+        reasoning: str | None = None,
+        constructive_feedback: str | None = None,
+        rewritten_poi: str | None = None,
+        rewrite_explanation: str | None = None,
     ) -> None:
         keep_text = self.should_store_answers(sub)
         with self._conn() as conn:
             inserted = conn.execute(
                 """
                 insert into reps (id, session_id, user_sub, drill_id, topic, mode, score,
-                                  timed_out, poi, poi_chars, latency_ms, prompt_tokens,
+                                  timed_out, poi, poi_chars, prompt_text, grade_label,
+                                  reasoning, constructive_feedback, rewritten_poi,
+                                  rewrite_explanation, latency_ms, prompt_tokens,
                                   completion_tokens, model)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s)
                 on conflict (id) do nothing
                 returning id
                 """,
                 (
                     rep_id, session_id, sub, drill_id, topic, mode, score, timed_out,
-                    poi if keep_text else None, poi_chars, latency_ms, prompt_tokens,
-                    completion_tokens, model,
+                    poi if keep_text else None, poi_chars,
+                    prompt_text if keep_text else None,
+                    grade_label if keep_text else None,
+                    reasoning if keep_text else None,
+                    constructive_feedback if keep_text else None,
+                    rewritten_poi if keep_text else None,
+                    rewrite_explanation if keep_text else None,
+                    latency_ms, prompt_tokens, completion_tokens, model,
                 ),
             ).fetchone()
             if inserted is None:
@@ -600,6 +647,32 @@ class PostgresStore(Store):
                 (sub, max(1, min(limit, 100))),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def session_detail(self, sub: str, session_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            session = conn.execute(
+                """
+                select id, user_sub, started_at, ended_at, reps_target, reps_done,
+                       seconds_per_rep, active_seconds, avg_score, completed, topic
+                from practice_sessions
+                where id = %s and user_sub = %s
+                """,
+                (session_id, sub),
+            ).fetchone()
+            if session is None:
+                return None
+            reps = conn.execute(
+                """
+                select id, drill_id, topic, mode, score, timed_out, poi, poi_chars,
+                       prompt_text, grade_label, reasoning, constructive_feedback,
+                       rewritten_poi, rewrite_explanation, latency_ms, created_at
+                from reps
+                where session_id = %s and user_sub = %s
+                order by created_at, id
+                """,
+                (session_id, sub),
+            ).fetchall()
+        return {"session": dict(session), "reps": [dict(row) for row in reps]}
 
     def import_sessions(self, sub: str, entries: Iterable[dict[str, Any]]) -> int:
         imported = 0

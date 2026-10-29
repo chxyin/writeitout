@@ -51,6 +51,11 @@ alter table practice_sessions add column if not exists topic text;
 
 -- One graded POI. The id comes from the client so a retried request cannot
 -- double-count a rep.
+--
+-- The text columns are everything needed to replay the rep later: the prompt
+-- that was on screen, the answer, and the chair's verdict. They follow the same
+-- redaction rule as `poi` — null unless the deployment stores answers and the
+-- delegate has not opted out — so a replay can never outlive the opt-out.
 create table if not exists reps (
   id                uuid primary key,
   session_id        uuid not null references practice_sessions(id) on delete cascade,
@@ -62,12 +67,29 @@ create table if not exists reps (
   timed_out         boolean not null default false,
   poi               text,
   poi_chars         integer not null default 0,
+  prompt_text       text,
+  grade_label       text,
+  reasoning         text,
+  constructive_feedback text,
+  rewritten_poi     text,
+  rewrite_explanation text,
   latency_ms        integer,
   prompt_tokens     integer,
   completion_tokens integer,
   model             text,
   created_at        timestamptz not null default now()
 );
+
+-- Reps graded before the session replay existed carry only their score, and a
+-- database created by an older version needs the new columns added: `create
+-- table if not exists` is a no-op on an existing table, so these are the
+-- migrations. Each one is idempotent.
+alter table reps add column if not exists prompt_text text;
+alter table reps add column if not exists grade_label text;
+alter table reps add column if not exists reasoning text;
+alter table reps add column if not exists constructive_feedback text;
+alter table reps add column if not exists rewritten_poi text;
+alter table reps add column if not exists rewrite_explanation text;
 
 -- Product analytics. Written by the batched ingest endpoint; rolled up nightly.
 create table if not exists events (

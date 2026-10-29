@@ -224,6 +224,15 @@ export async function fetchHistory(limit = 20) {
   }
 }
 
+/**
+ * One past session and its reps, for the replay page. Unlike the readers above
+ * this one throws: the page has to tell "this is not your session" from "the
+ * network dropped", and both from "the API is asleep".
+ */
+export async function fetchSessionDetail(id) {
+  return api.get(`/api/sessions/${id}`, { timeoutMs: 12_000 });
+}
+
 export async function fetchProfile() {
   try {
     return await api.get('/api/profile');

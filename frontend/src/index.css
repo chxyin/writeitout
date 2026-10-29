@@ -1525,3 +1525,274 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .splash-screen .hero-logo { animation: none; }
 }
 
+/* ---------- Recent Sessions: the rows that open ----------
+   A session that exists in the database is a link to its own page; one that only
+   ever lived in this browser's old list stays a plain row, because there is
+   nothing behind it. The chevron is the only cue that a row is clickable — the
+   row keeps the exact shape it had. */
+.splash-screen .history-item.is-open {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.splash-screen .history-item.is-open:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.splash-screen .history-item.is-open:active { background: rgba(255, 255, 255, 0.16); }
+.splash-screen .history-item.is-open:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.splash-screen .history-open {
+  flex: 0 0 auto;
+  margin-left: 0.55rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.4);
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+.splash-screen .history-item.is-open:hover .history-open {
+  color: #fff;
+  transform: translateX(2px);
+}
+
+/* ---------- A past session, replayed ----------
+   The drill and the feedback card again, on the app's own three-band shell, so a
+   replay looks like the session did. Everything that could change something is
+   gone: the bar above carries when it happened and how it ended, not controls. */
+.session-page {
+  /* Fixed rather than a flex child of #root: #root is an unstyled flex item of
+     body's centring row, so it shrink-wraps its content. A wrapper inside it
+     would inherit that guessed width (a session with a short speech laid out
+     ~780px wide and centred), and `width: 100%` cannot fix it because the
+     percentage has nothing definite to resolve against. Pinned to the viewport
+     the page gets its real width, the same trick the splash screen uses. */
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.session-shell { gap: 1rem; }
+
+.session-top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+/* .exit-task-btn is the game's absolutely-placed leading-edge button; here it is
+   an ordinary member of the header row. */
+.session-back,
+.session-back:hover,
+.session-back:active { position: static; transform: none; }
+
+.session-heading {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.session-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.62);
+}
+.session-meta-dot { opacity: 0.5; }
+
+.session-badges { display: flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; }
+.session-badge {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: #fff;
+}
+.session-badge.is-complete { border-color: rgba(52, 199, 89, 0.5); background: rgba(52, 199, 89, 0.18); }
+.session-badge.is-ended { border-color: rgba(255, 149, 0, 0.45); background: rgba(255, 149, 0, 0.16); }
+.session-badge.is-score { font-variant-numeric: tabular-nums; }
+.session-badge.is-score.score-high { color: #34C759; }
+.session-badge.is-score.score-mid { color: var(--accent-orange); }
+.session-badge.is-score.score-low { color: #FF7A70; }
+.session-badge.is-score.score-none { color: rgba(255, 255, 255, 0.65); }
+
+/* What this rep was: its score, how it was set, and whether the clock cut it off. */
+.session-rep-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+.session-rep-score {
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.session-rep-score.score-high { color: #34C759; background: rgba(52, 199, 89, 0.15); }
+.session-rep-score.score-mid { color: var(--accent-orange); background: rgba(255, 149, 0, 0.15); }
+.session-rep-score.score-low { color: #FF7A70; background: rgba(255, 59, 48, 0.16); }
+.session-rep-score.score-none { color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.08); }
+
+.rep-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.85);
+}
+.rep-chip.is-quiet {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+.rep-chip.is-warn {
+  border-color: rgba(255, 59, 48, 0.45);
+  background: rgba(255, 59, 48, 0.18);
+  color: #FFD9D6;
+}
+
+/* Frozen: the answer is text to read, not a draft to edit. It takes its own
+   height, so a long POI is simply read down the page instead of being squeezed
+   into the composer's one-line box and scrolled inside it. */
+.frozen-answer {
+  padding: 1.1rem 1.2rem;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  font-size: 1rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: rgba(255, 255, 255, 0.92);
+}
+@media (min-width: 641px) {
+  .frozen-answer { min-height: var(--layout-textarea-min-height, 100px); }
+}
+.frozen-answer-missing {
+  display: flex;
+  align-items: center;
+  min-height: var(--layout-textarea-height, 100px);
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.14);
+  font-size: 0.9rem;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.62);
+}
+.prompt-missing { font-style: italic; color: rgba(255, 255, 255, 0.65); }
+/* Stands where Submit would be, for a rep that was graded before the chair's
+   verdict was being stored. Quiet on purpose: it is a statement, not an action. */
+.frozen-note {
+  margin-top: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+}
+.feedback-card.is-frozen .feedback-score { letter-spacing: -0.02em; }
+
+/* The small glass cards that stand in for a screen that cannot be shown.
+   Everything here is the splash's glass recipe, restated rather than borrowed:
+   those rules are scoped to .splash-screen and this page is not the splash. */
+.session-gate {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  text-align: center;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.session-gate .card-title { margin: 0; font-size: 1.3rem; font-weight: 900; line-height: 1.25; }
+.session-gate .play-btn {
+  margin-top: 0.25rem;
+  padding: 0.85rem 1.6rem;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent-red);
+  box-shadow: 0 6px 0 #b3261e;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  cursor: pointer;
+}
+.session-gate .play-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b3261e; }
+.session-gate .play-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.session-gate .google-login-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.session-gate .google-login-wrap iframe { width: 100% !important; max-width: 100%; border-radius: 10px; }
+.session-gate .auth-error { margin: 0; font-size: 0.8rem; color: #FFD9D6; }
+.session-gate-copy {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+@media (max-width: 640px) {
+  .session-top { gap: 0.6rem; }
+  .session-heading { flex: 1 1 100%; order: 3; }
+  .session-title { font-size: 0.95rem; white-space: normal; }
+  .session-badges { order: 2; margin-left: auto; }
+}
+

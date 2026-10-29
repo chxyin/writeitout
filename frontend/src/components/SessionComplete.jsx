@@ -12,7 +12,12 @@ export default function SessionComplete({
   total = 5,
   completed = 0,
   average = null,
-  topic = ''
+  topic = '',
+  // The replay page shows this same card for a session that is already over, so
+  // the kicker and the two actions are worded for reading rather than playing.
+  frozen = false,
+  exitLabel = 'Exit Task',
+  startLabel = 'Start New Session'
 }) {
   const reps = completed === 1 ? 'rep' : 'reps';
   const finished = completed >= total;
@@ -21,7 +26,9 @@ export default function SessionComplete({
     <div className="session-complete">
       <div className="session-complete-body">
         <span className="session-complete-kicker">
-          {finished ? 'Session complete' : 'Session ended'}
+          {frozen
+            ? finished ? 'Session was completed' : 'Session was ended early'
+            : finished ? 'Session complete' : 'Session ended'}
         </span>
 
         <div className="session-complete-count">
@@ -41,10 +48,10 @@ export default function SessionComplete({
 
       <div className="session-complete-actions">
         <button type="button" className="session-exit-btn" onClick={onExit}>
-          Exit Task
+          {exitLabel}
         </button>
         <button type="button" className="session-start-btn" onClick={onStart}>
-          Start New Session
+          {startLabel}
         </button>
       </div>
     </div>

@@ -449,6 +449,15 @@ class RepRequest(BaseModel):
     prompt_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     completion_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     model: str | None = Field(default=None, max_length=64)
+    # The replay. `prompt_text` is the speech exactly as it was on screen, and the
+    # rest is the chair's verdict, so a session can be read back later instead of
+    # vanishing with the tab. All optional: an older client sends none of them.
+    prompt_text: str | None = Field(default=None, max_length=MAX_SPEECH_CHARS)
+    grade_label: str | None = Field(default=None, max_length=40)
+    reasoning: str | None = Field(default=None, max_length=2000)
+    constructive_feedback: str | None = Field(default=None, max_length=2000)
+    rewritten_poi: str | None = Field(default=None, max_length=4000)
+    rewrite_explanation: str | None = Field(default=None, max_length=2000)
 
 
 class ActivityRequest(BaseModel):
@@ -506,6 +515,111 @@ def _session_json(row: dict[str, Any]) -> dict[str, Any]:
         "reps_done": row.get("reps_done") or 0,
         "reps_target": row.get("reps_target") or 0,
         "completed": bool(row.get("completed")),
+    }
+
+
+# The speech dataset, indexed by its own id, so a stored rep can be replayed with
+# the committee and country it was drawn from — and, for reps graded before the
+# prompt was stored, with the prompt rebuilt from the speech itself.
+_speech_index: dict[str, dict[str, Any]] | None = None
+
+
+def speech_index() -> dict[str, dict[str, Any]]:
+    global _speech_index
+    if _speech_index is not None:
+        return _speech_index
+    try:
+        speeches = load_speeches()
+    except HTTPException:
+        # No dataset is not a reason to fail a replay: the rep still has its
+        # score, answer and topic.
+        return {}
+    _speech_index = {
+        str(item.get("id")): item for item in speeches if str(item.get("id") or "")
+    }
+    return _speech_index
+
+
+def _rep_json(row: dict[str, Any]) -> dict[str, Any]:
+    """One rep as the replay page needs it.
+
+    The prompt is the stored text when there is one (exactly what was on screen),
+    and otherwise the speech from the dataset: the full text for a Full Speech
+    rep, the solutions slice for a Solutions Only rep. `prompt_source` says which,
+    so the page can be honest about a rebuilt prompt.
+    """
+    drill_id = str(row.get("drill_id") or "")
+    source = speech_index().get(drill_id) or {}
+    mode = "single" if row.get("mode") == "single" else "full"
+
+    prompt = row.get("prompt_text") or None
+    prompt_source = "stored" if prompt else None
+    if not prompt and source:
+        text = str(source.get("text") or "").strip()
+        if text:
+            prompt = text if mode == "full" else _extract_solutions_claim(text)
+            prompt_source = "dataset"
+
+    feedback = None
+    if row.get("reasoning") or row.get("rewritten_poi") or row.get("grade_label"):
+        feedback = {
+            "score": float(row["score"]) if row.get("score") is not None else None,
+            "grade_label": row.get("grade_label") or "",
+            "reasoning": row.get("reasoning") or "",
+            "constructive_feedback": row.get("constructive_feedback") or "",
+            "rewritten_poi": row.get("rewritten_poi") or "",
+            "rewrite_explanation": row.get("rewrite_explanation") or "",
+        }
+
+    return {
+        "id": str(row.get("id") or ""),
+        "score": float(row["score"]) if row.get("score") is not None else None,
+        "topic": row.get("topic") or (source.get("topic") or ""),
+        "mode": mode,
+        "timed_out": bool(row.get("timed_out")),
+        "created_at": _iso(row.get("created_at")),
+        "latency_ms": row.get("latency_ms"),
+        # Null, not "", when nothing was kept: the page has to say "not saved"
+        # rather than show an empty answer that looks like the delegate wrote
+        # nothing.
+        "answer": row.get("poi") or None,
+        "prompt": prompt,
+        "prompt_source": prompt_source,
+        "feedback": feedback,
+        "drill": {
+            "topic": source.get("topic") or row.get("topic") or "",
+            "committee": source.get("committee") or "",
+            "delegate": source.get("country") or "",
+        },
+    }
+
+
+def _session_detail_json(detail: dict[str, Any]) -> dict[str, Any]:
+    """A session header plus its reps in order, for the replay page."""
+    session = detail["session"]
+    started = session.get("started_at")
+    ended = session.get("ended_at")
+    duration = None
+    if started is not None and ended is not None:
+        try:
+            duration = max(0, int((ended - started).total_seconds()))
+        except TypeError:
+            duration = None
+    score = session.get("avg_score")
+    return {
+        "session": {
+            "id": str(session.get("id") or ""),
+            "topic": session.get("topic") or "",
+            "score": float(score) if score is not None else None,
+            "started_at": _iso(started),
+            "ended_at": _iso(ended),
+            "duration_seconds": duration,
+            "reps_target": int(session.get("reps_target") or 0),
+            "reps_done": int(session.get("reps_done") or 0),
+            "seconds_per_rep": int(session.get("seconds_per_rep") or 0),
+            "completed": bool(session.get("completed")),
+        },
+        "reps": [_rep_json(row) for row in detail["reps"]],
     }
 
 
@@ -725,6 +839,12 @@ def add_rep(session_id: str, payload: RepRequest, request: Request) -> dict[str,
         prompt_tokens=payload.prompt_tokens,
         completion_tokens=payload.completion_tokens,
         model=payload.model,
+        prompt_text=payload.prompt_text,
+        grade_label=payload.grade_label,
+        reasoning=payload.reasoning,
+        constructive_feedback=payload.constructive_feedback,
+        rewritten_poi=payload.rewritten_poi,
+        rewrite_explanation=payload.rewrite_explanation,
     )
     return {"ok": True}
 
@@ -734,6 +854,21 @@ def list_sessions(request: Request, limit: int = 20) -> dict[str, Any]:
     user = require_user(request)
     rows = get_store().list_sessions(user["sub"], limit)
     return {"sessions": [_session_json(row) for row in rows]}
+
+
+@app.get("/api/sessions/{session_id}")
+def session_detail(session_id: str, request: Request) -> dict[str, Any]:
+    """One session, replayed: the prompt, the answer and the chair's verdict.
+
+    This is the read side of a practice session — everything needed to walk back
+    through it. A session that is not this account's is a 404, not a 403: the id
+    is a UUID, so "not yours" and "does not exist" should look identical.
+    """
+    user = require_user(request)
+    detail = get_store().session_detail(user["sub"], _session_id(session_id))
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Unknown practice session.")
+    return _session_detail_json(detail)
 
 
 @app.post("/api/sessions/import")
