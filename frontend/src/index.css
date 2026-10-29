@@ -228,7 +228,7 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .settings-reset:disabled { opacity: 0.45; cursor: default; }
 .settings-reset:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
 
-.toggle-switch-sm { position: relative; width: 36px; height: 20px; background: #ccc; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
+.toggle-switch-sm { position: relative; width: 36px; height: 20px; background: #ccc; border: none; padding: 0; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; appearance: none; }
 .toggle-switch-sm.active { background: var(--accent-orange); }
 .toggle-knob-sm { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
 .toggle-switch-sm.active .toggle-knob-sm { transform: translateX(16px); }
@@ -326,11 +326,19 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 /* Segmented progress: one block per rep, with the current rep number on the
    right. The block count follows the session length, so 5/10/20 all work. */
 .progress-bar { display: flex; align-items: center; gap: 10px; width: 100%; }
-.progress-segments { display: flex; flex: 1 1 auto; gap: 4px; min-width: 0; }
+/* The gear floats in the page's top-right corner, so the progress row has to stop
+   short of it. Mobile reserves the corner with its 3.5rem gutter; tablet has no
+   gutter to spare, and on desktop the row only clears the gear while Top Offset
+   is large enough — so both reserve the overlap explicitly. */
+.app-container[data-tier="tablet"] .progress-bar { padding-right: 56px; }
+/* One segment per rep, sized by App from the session length: a 100-rep custom
+   session used to need ~800px of 4px blocks and pushed the counter and the timer
+   chip out of the shell. */
+.progress-segments { display: flex; flex: 1 1 auto; gap: var(--segment-gap, 4px); min-width: 0; }
 .progress-segment {
   flex: 1 1 0;
   height: 8px;
-  min-width: 4px;
+  min-width: var(--segment-min, 4px);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.22);
   transition: background 0.35s var(--ease-out-premium), box-shadow 0.35s var(--ease-out-premium);
@@ -400,7 +408,7 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .exit-task-btn:hover { background: rgba(255, 255, 255, 0.24); border-color: rgba(255, 255, 255, 0.4); }
 .exit-task-btn:active { transform: translateY(-50%) scale(0.96); }
 .exit-task-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-.toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
+.toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border: none; padding: 0; border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; appearance: none; }
 .toggle-switch.active { background: var(--accent-orange); }
 .toggle-knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
 .toggle-switch.active .toggle-knob { transform: translateX(22px); }
@@ -537,7 +545,7 @@ textarea:focus {
 .feedback-label { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1.5rem; }
 /* Only drawn when the rep's clock submitted the POI. Sits under the label with
    the label's own margin pulled back, so the card reads the same either way. */
-.feedback-timeout { margin: -1rem 0 1.5rem; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; color: #B26B00; }
+.feedback-timeout { margin: -1rem 0 1.5rem; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; color: #8A5A00; }
 .feedback-card p { font-size: 1rem; line-height: 1.5; margin-bottom: 1rem; }
 .rewrite-box { background: #FFF4E5; border-left: 4px solid var(--accent-orange); padding: 1rem; border-radius: 0 8px 8px 0; margin-top: 1.5rem; }
 .rewrite-box span { color: var(--accent-orange); font-weight: 800; font-size: 0.8rem; text-transform: uppercase; display: block; margin-bottom: 0.5rem; }
@@ -731,6 +739,10 @@ textarea:focus {
        units are not zoom-aware, so they are divided by --ui-scale. */
     --shell-top: calc(var(--app-top-offset) / var(--ui-scale));
     --shell-bottom: calc(var(--app-bottom-offset) / var(--ui-scale));
+    /* Clear the floating gear by exactly the overlap it would have with the top
+       band: none at the default 10vh, the full 40px + margins when the Top Offset
+       slider is pulled to 0. */
+    --gear-clearance: max(0px, 60px - var(--shell-top));
     height: calc(100vh / var(--ui-scale) - var(--shell-top) - var(--shell-bottom));
     min-height: 0;
     max-height: calc(100vh / var(--ui-scale) - var(--shell-top) - var(--shell-bottom));
@@ -751,6 +763,8 @@ textarea:focus {
     width: var(--speech-card-width);
     margin: 0 auto;
   }
+
+  .app-container .progress-bar { padding-right: var(--gear-clearance); }
 }
 
 /* Everything below is scoped to the desktop tier, so the tablet and mobile
@@ -906,7 +920,7 @@ textarea:focus {
   flex: 1 1 auto;
   /* Extra top padding clears the topic badge, which hangs 12px above the card
      and can wrap to three lines in a half-width pane. */
-  padding: 2.5rem 1.25rem 1.25rem;
+  padding: 2.75rem 1.25rem 1.25rem;
 }
 .app-container[data-tier="tablet"] .poi-input-area {
   display: flex;
@@ -1011,13 +1025,15 @@ body[data-tier="mobile"] {
 .app-container[data-tier="mobile"] .prompt-card {
   /* No max-height here: the card grows into whatever the flex parent leaves
      free, and the inner .prompt-scroll becomes the only scroller on screen.
-     The padding clears the topic badge, which can wrap to three lines. The type
-     size comes from --speech-font-size, so the Formatting slider works here too. */
+     The padding clears the topic badge, which wraps to three lines on a narrow
+     phone; 2.25rem left a two-line badge overlapping the first line of speech.
+     The type size comes from --speech-font-size, so the Formatting slider works
+     here too. */
   height: auto;
   max-height: none;
   flex: 1 1 auto;
   min-height: 0;
-  padding: 2.25rem 1.25rem 1.25rem;
+  padding: 2.75rem 1.25rem 1.25rem;
 }
 .app-container[data-tier="mobile"] .prompt-scroll {
   flex: 1 1 auto;
@@ -1029,16 +1045,25 @@ body[data-tier="mobile"] {
 .app-container[data-tier="mobile"] textarea {
   padding: 1rem;
 }
-/* Feedback and session-complete screens take the whole shell and scroll
-   internally, so nothing is trapped by the locked page. */
+/* Feedback and session-complete screens take the whole shell. The card itself
+   does not scroll: the body does, with the Back/Next footer pinned to the bottom
+   edge, so the primary action is reachable without scrolling past the rewrite. */
 .app-container[data-tier="mobile"] .feedback-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.5rem 1.5rem 1rem;
+}
+.app-container[data-tier="mobile"] .feedback-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 1.5rem;
 }
+.app-container[data-tier="mobile"] .feedback-footer { flex: 0 0 auto; }
 .app-container[data-tier="mobile"] .poi-input-area,
 .app-container[data-tier="mobile"] .submit-btn,
 .app-container[data-tier="mobile"] .next-btn,
@@ -1233,7 +1258,9 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   flex: 1 1 auto; white-space: nowrap;
   background: transparent; border: none; border-radius: 8px; padding: 0.4rem 0.7rem;
   font-family: inherit; font-size: 0.8rem; font-weight: 800;
-  color: rgba(255, 255, 255, 0.5); cursor: pointer; transition: all 0.2s;
+  /* Dimmer than the active pill, but not so dim that an unselected label fails
+     contrast against the dark track (0.5 measured ~3.9:1). */
+  color: rgba(255, 255, 255, 0.62); cursor: pointer; transition: all 0.2s;
 }
 .splash-screen .seg-btn.active { background: var(--splash-accent); color: #fff; box-shadow: 0 4px 10px rgba(255, 149, 0, 0.3); }
 .splash-screen .seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
@@ -1353,7 +1380,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   font-size: 0.85rem; border: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
 }
-.splash-screen .history-topic { font-weight: 600; color: rgba(255, 255, 255, 0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.splash-screen .history-topic { flex: 1 1 auto; min-width: 0; font-weight: 600; color: rgba(255, 255, 255, 0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .splash-screen .history-date { color: rgba(255, 255, 255, 0.5); font-size: 0.75rem; margin-right: auto; margin-left: 1rem; }
 .splash-screen .history-score { font-weight: 900; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
 .splash-screen .score-high { color: var(--splash-green); background: rgba(52, 199, 89, 0.15); }
@@ -1383,10 +1410,11 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
      logged out: logo (1) → sign-in (2) → settings (3)
      logged in:  logo (1) → settings (2) → profile (3)
    Both states share the 1/3 slots, so the two order rules hang off the state
-   class on .splash-screen instead of the mocks' duplicated block. 900px is the
-   mock's breakpoint and is kept on purpose: the game's own tiers (640/1024) are
-   about the drill view, not this screen. */
-@media (max-width: 900px) {
+   class on .splash-screen instead of the mocks' duplicated block. The breakpoint
+   matches the app's own tablet edge (1024): below it the two panels are too
+   narrow for their own padding, and the picker rows — a fixed label column plus a
+   full-width bar — ran out of room and wrapped between 901 and 950px. */
+@media (max-width: 1024px) {
   .splash-screen { padding: 1.5rem 1.25rem; }
   .splash-screen .split-layout { flex-direction: column; gap: 2rem; }
   .splash-screen .left-panel { display: contents; }
@@ -1403,8 +1431,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
      segments tighten a notch so the row stays on one line. The control stops
      growing on the cross axis — it is a row inside a column now, where a
      flex-basis of 0 has nothing to grow into. */
-  .splash-screen .setting-row { flex-direction: column; align-items: stretch; gap: 0.35rem; }
-  .splash-screen .setting-label { flex: 0 0 auto; }
+  .splash-screen .setting-row { flex-direction: column; align-items: stretch; gap: 0.35rem; }  .splash-screen .setting-label { flex: 0 0 auto; }
   .splash-screen .setting-control { flex: 0 0 auto; }
   .splash-screen .seg-btn { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
   .splash-screen .seg-input { width: 4.5rem; }

@@ -7,18 +7,23 @@ React + Vite front end for the WriteItOut MUN POI trainer.
 The splash screen signs delegates in with Google, which needs an OAuth client:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials),
-   create an **OAuth 2.0 Client ID** of type **Web application**.
-2. Add the origins the app is served from under **Authorised JavaScript origins**
-   — `http://localhost:5173` for `npm run dev`, and `https://chxyin.github.io`
-   for the GitHub Pages deploy.
-3. Copy `.env.example` to `.env` and paste the client ID into
-   `VITE_GOOGLE_CLIENT_ID`. Vite bakes it in at build time, so restart the dev
-   server after changing it.
-4. For the deployed site, add the same value as a repository secret named
+   open the **OAuth 2.0 Client ID** of type **Web application** (this project's is
+   `802894837975-lmjp3uam5tjc641a8sfknsb59218mtoe.apps.googleusercontent.com`).
+2. Make sure **Authorised JavaScript origins** cover every origin the app is
+   served from — `http://localhost:5173` for `npm run dev`, and
+   `https://chxyin.github.io` for the GitHub Pages deploy.
+3. `.env` already carries the client ID; Vite bakes it in at build time, so
+   restart the dev server after changing it. A fork replaces the value in `.env`
+   (and in the repository secret below) with its own client ID.
+4. For the deployed site, set the same value as a repository secret named
    `VITE_GOOGLE_CLIENT_ID`; `.github/workflows/deploy.yml` passes it to the build.
+   Without it the bundle falls back to the project client ID, so a deploy still
+   signs in.
 
-Without a client ID the app still runs: the sign-in button is rendered, but
-Google refuses to issue a token, and the splash screen stays signed out.
+The client ID is public — it is checked against the page's origin, not kept
+secret. The **ID token** it returns is the credential: the backend verifies it at
+`POST /api/auth/google` and reads the account from it. `GET /api/me` returns the
+same verified profile for a `Bearer` token.
 
 ## Scripts
 

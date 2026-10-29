@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ZOOM_RANGE } from '../lib/zoom.js';
 import { COLOR_THEMES, BACKGROUNDS } from '../lib/appearance.js';
 import {
@@ -83,6 +83,8 @@ function SliderRow({ label, value, range, formatValue, onChange }) {
 export default function SettingsMenu({
   open,
   onToggle,
+  // Dismissing the panel: a click outside it, Escape, or leaving the drill.
+  onClose,
   animOn,
   onAnimToggle,
   showTopic,
@@ -112,10 +114,38 @@ export default function SettingsMenu({
   // closed and reopened all the time, and which tab you looked at last is not a
   // preference worth remembering.
   const [tab, setTab] = useState('general');
+  const containerRef = useRef(null);
+
+  // A floating panel has to be dismissible the way people expect one to be: a
+  // press anywhere else, or Escape. Without this the only way out was the gear
+  // itself, and the panel sat over the drill while the clock ran.
+  useEffect(() => {
+    if (!open) return undefined;
+    const dismissOnOutsidePress = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) onClose();
+    };
+    const dismissOnEscape = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', dismissOnOutsidePress);
+    document.addEventListener('touchstart', dismissOnOutsidePress, { passive: true });
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', dismissOnOutsidePress);
+      document.removeEventListener('touchstart', dismissOnOutsidePress);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [open, onClose]);
 
   return (
-    <div className="settings-container">
-      <button className="settings-btn" onClick={onToggle}>
+    <div className="settings-container" ref={containerRef}>
+      <button
+        className="settings-btn"
+        onClick={onToggle}
+        aria-label="Settings"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0 1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
 
@@ -140,19 +170,55 @@ export default function SettingsMenu({
             <>
               <div className="setting-item">
                 <span>Falling Papers</span>
-                <div className={`toggle-switch-sm ${animOn ? 'active' : ''}`} onClick={onAnimToggle}><div className="toggle-knob-sm"></div></div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={animOn}
+                  aria-label="Falling papers"
+                  className={`toggle-switch-sm ${animOn ? 'active' : ''}`}
+                  onClick={onAnimToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
               </div>
               <div className="setting-item">
                 <span>Show Topic Tag</span>
-                <div className={`toggle-switch-sm ${showTopic ? 'active' : ''}`} onClick={onShowTopicToggle}><div className="toggle-knob-sm"></div></div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showTopic}
+                  aria-label="Show topic tag"
+                  className={`toggle-switch-sm ${showTopic ? 'active' : ''}`}
+                  onClick={onShowTopicToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
               </div>
               <div className="setting-item">
                 <span>Show Comm/Delegation</span>
-                <div className={`toggle-switch-sm ${showComm ? 'active' : ''}`} onClick={onShowCommToggle}><div className="toggle-knob-sm"></div></div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showComm}
+                  aria-label="Show committee and delegation"
+                  className={`toggle-switch-sm ${showComm ? 'active' : ''}`}
+                  onClick={onShowCommToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
               </div>
               <div className="setting-item">
                 <span>Low Intensity</span>
-                <div className={`toggle-switch-sm ${lowIntensity ? 'active' : ''}`} onClick={onLowIntensityToggle}><div className="toggle-knob-sm"></div></div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={lowIntensity}
+                  aria-label="Low intensity"
+                  className={`toggle-switch-sm ${lowIntensity ? 'active' : ''}`}
+                  onClick={onLowIntensityToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
               </div>
               <SliderRow
                 label="Zoom"

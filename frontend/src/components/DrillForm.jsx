@@ -29,8 +29,9 @@ export default function DrillForm({
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
       // Mirrors the Submit button's disabled state so the shortcut never fires
-      // on an empty draft or while a grade is already in flight.
-      if (poi && !loading) onSubmit();
+      // on an empty draft or while a grade is already in flight. A draft of only
+      // spaces counts as empty: the server strips it and would reject the POI.
+      if (poi.trim() && !loading) onSubmit();
     }
   };
 
@@ -84,7 +85,7 @@ export default function DrillForm({
               <div className="submit-error" role="alert">{submitError}</div>
             )}
 
-            <button className="submit-btn stagger-in stagger-5" onClick={onSubmit} disabled={loading || !poi}>
+            <button className="submit-btn stagger-in stagger-5" onClick={onSubmit} disabled={loading || !poi.trim()}>
               {loading ? 'Chair is Grading...' : 'Submit POI'}
             </button>
           </>}

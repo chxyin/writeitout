@@ -16,6 +16,7 @@ import PaperBackground from './components/PaperBackground.jsx';
 // renders it exactly as drawn and the browser can cache the file.
 import appIcon from './assets/writeitout_icon.svg';
 import { saveSessionResult } from './lib/sessionHistory.js';
+import useAuthSession, { authorizationHeaders } from './lib/auth.js';
 import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
@@ -48,9 +49,46 @@ function formatClock(seconds) {
 
 const SETTINGS_STORAGE_KEY = 'writeitout:settings';
 
+/** How long to wait for a grade before giving up (the backend allows 40s). */
+const GRADE_TIMEOUT_MS = 45_000;
+
 /** One rep in the history timeline. `feedback` stays null until it is graded. */
 function createRep(drill) {
   return { drill, poi: '', feedback: null };
+}
+
+const LAST_SESSION_STORAGE_KEY = 'writeitout:last-session';
+
+/** What the splash screen opens on before a session has ever been started. */
+const DEFAULT_SESSION = { reps: 10, timer: 0 };
+
+/**
+ * The reps/timer pair from the last session, so exiting a task and pressing Play
+ * again does not silently reset the delegate to 10 reps and no clock. Bounds are
+ * the picker's own; anything else falls back rather than reaching the layout.
+ */
+function loadLastSession() {
+  if (typeof window === 'undefined') return DEFAULT_SESSION;
+  let parsed;
+  try {
+    parsed = JSON.parse(window.localStorage.getItem(LAST_SESSION_STORAGE_KEY) || 'null');
+  } catch {
+    return DEFAULT_SESSION;
+  }
+  if (!parsed || typeof parsed !== 'object') return DEFAULT_SESSION;
+  const reps = Number(parsed.reps);
+  const timer = Number(parsed.timer);
+  if (!Number.isInteger(reps) || reps < 1 || reps > 100) return DEFAULT_SESSION;
+  if (!Number.isInteger(timer) || timer < 0 || timer > 600) return DEFAULT_SESSION;
+  return { reps, timer };
+}
+
+function persistLastSession(settings) {
+  try {
+    window.localStorage.setItem(LAST_SESSION_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Private browsing or a full quota: the next visit just starts at defaults.
+  }
 }
 
 const DEFAULT_SETTINGS = {
@@ -133,9 +171,15 @@ export default function App() {
   // View routing. The splash screen collects the practice settings; the game view
   // is the drill loop below. gameSettings is what Play handed over — { reps, timer }
   // — or null before the first session: reps is the session length, timer the
-  // per-rep countdown.
+  // per-rep countdown. It is persisted too, so the splash can start on the numbers
+  // the delegate last chose instead of snapping back to their defaults.
   const [currentView, setCurrentView] = useState('splash');
-  const [gameSettings, setGameSettings] = useState(null);
+  const [gameSettings, setGameSettings] = useState(loadLastSession);
+
+  // The Google session. Held here rather than in the splash so the drill can use
+  // it as well: the request headers carry the credential and the history bucket
+  // is keyed by the account id.
+  const { session, signIn, signOut } = useAuthSession();
 
   // Session length is the single source of truth for the progress bar, the
   // next-rep check and the completion screen. It comes from the splash screen's
@@ -154,7 +198,13 @@ export default function App() {
   // Settings → Formatting: four free-running layout numbers, carried to CSS as
   // the --fmt-* custom properties below.
   const { topOffset, bottomOffset, textSize, cardWidth } = settings;
+  const closeMenu = useCallback(() => setShowMenu(false), []);
   const exitTimer = useRef(null);
+  // When the rep on screen runs out, as an absolute epoch millisecond. The clock
+  // reads this rather than counting its own ticks: a backgrounded tab throttles
+  // timers to one a minute (and iOS suspends them), which used to hand back
+  // minutes of extra time and fire the auto-submit late.
+  const deadlineRef = useRef(0);
   // True once this rep's clock has auto-submitted it. Cleared by everything that
   // puts a rep (or a fresh clock) on screen, so a rep can be sent by the timer
   // only once per countdown — and the graded entry that comes back can never
@@ -198,6 +248,18 @@ export default function App() {
   // setting, which has no clock and never reaches this branch.
   const clockExpired = repSeconds > 0 && timeLeft === 0 && Boolean(currentDrill);
 
+  // One segment per rep stops fitting once a custom session runs long — 100 reps
+  // need ~800px of 4px blocks — and the row would push the counter and the timer
+  // chip out of the shell. The segments shrink with the count instead.
+  const segmentMetrics =
+    sessionLength > 60
+      ? { min: 1, gap: 2 }
+      : sessionLength > 40
+        ? { min: 2, gap: 2 }
+        : sessionLength > 24
+          ? { min: 3, gap: 3 }
+          : { min: 4, gap: 4 };
+
   const activePrompt = currentDrill
     ? mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech
     : '';
@@ -217,6 +279,15 @@ export default function App() {
     };
   }, []);
 
+  // Starts the rep's countdown: the deadline is fixed here and never re-derived
+  // from a tick, so the remaining time stays true across tab changes. A session
+  // with no timer leaves the deadline at 0, which `timeLeft` and the expired
+  // check both read as "no clock".
+  const startClock = useCallback(() => {
+    deadlineRef.current = repSeconds > 0 ? Date.now() + repSeconds * 1000 : 0;
+    setTimeLeft(repSeconds);
+  }, [repSeconds]);
+
   const loadFirstRep = useCallback(async () => {
     setLoadingDrill(true);
     setDrillError('');
@@ -227,13 +298,13 @@ export default function App() {
       setPoi('');
       // First rep of a session: the splash screen's Timer value starts over.
       autoSubmittedRef.current = false;
-      setTimeLeft(repSeconds);
+      startClock();
     } catch (error) {
       setDrillError(error.message);
     } finally {
       setLoadingDrill(false);
     }
-  }, [requestDrill, repSeconds]);
+  }, [requestDrill, startClock]);
 
   // The first drill is fetched when the game view opens, not on mount: a session
   // only exists once Play has been pressed, and the splash screen has no use for
@@ -244,18 +315,25 @@ export default function App() {
     return () => clearTimeout(loadDrill);
   }, [currentView, history.length, loadFirstRep]);
 
-  // Rep timer, part 1 of 1: tick while a POI can still be written. The clock is
-  // reset by whatever puts a rep on screen (loadFirstRep / startNewRep /
-  // goToEntry / back to edit) rather than by an effect, so the chip never renders
-  // a stale value for a frame. Feedback and the completion screen pause it. At
-  // zero the clock stops on its own — the auto-submit below is a separate effect,
-  // because this one only owns the countdown.
+  // Rep timer: read the remaining time off the deadline while a POI can still be
+  // written. Half-second sampling keeps the chip in step with the wall clock
+  // without re-rendering on ticks that do not change a whole second. Feedback and
+  // the completion screen pause it; at zero the clock stops on its own and the
+  // auto-submit below (a separate effect) takes over. A visibility change is
+  // sampled immediately, so returning to a tab that was hidden for minutes shows
+  // the truth at once instead of a stale minute.
   useEffect(() => {
     if (!repSeconds || showFeedback || sessionComplete || !currentDrill) return undefined;
-    const tick = setInterval(() => {
-      setTimeLeft((remaining) => (remaining > 0 ? remaining - 1 : 0));
-    }, 1000);
-    return () => clearInterval(tick);
+    const sync = () => {
+      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setTimeLeft(remaining);
+    };
+    const tick = setInterval(sync, 500);
+    document.addEventListener('visibilitychange', sync);
+    return () => {
+      clearInterval(tick);
+      document.removeEventListener('visibilitychange', sync);
+    };
   }, [repSeconds, showFeedback, sessionComplete, currentDrill]);
 
   // < Prev / Next > and ← Back share this: load a saved rep, no API call. The
@@ -273,9 +351,9 @@ export default function App() {
     // Same rule as a fresh rep: the countdown belongs to the rep on screen, and
     // its one automatic submit is available again.
     autoSubmittedRef.current = false;
-    setTimeLeft(repSeconds);
+    startClock();
     if (exitTimer.current) clearTimeout(exitTimer.current);
-  }, [history, repSeconds]);
+  }, [history, startClock]);
 
   useEffect(() => {
     document.body.className = '';
@@ -349,13 +427,13 @@ export default function App() {
       }
       setPoi('');
       autoSubmittedRef.current = false;
-      setTimeLeft(repSeconds);
+      startClock();
     } catch (error) {
       setDrillError(error.message);
     } finally {
       setLoadingDrill(false);
     }
-  }, [currentEntry, currentIndex, history.length, loadingDrill, repSeconds, requestDrill]);
+  }, [currentEntry, currentIndex, history.length, loadingDrill, requestDrill, startClock]);
 
   const wordCount = poi.trim() ? poi.trim().split(/\s+/).length : 0;
 
@@ -374,19 +452,36 @@ export default function App() {
     if (!currentDrill || !poi || loading) return;
     setLoading(true);
     setSubmitError('');
+    // The chair may take its time, but not forever: the backend gives DeepSeek 40
+    // seconds, so a request that outlives this ceiling is lost, and without the
+    // abort Submit would sit on "Chair is Grading..." until the page reloaded.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GRADE_TIMEOUT_MS);
     try {
       const response = await fetch(`${API_BASE_URL}/api/grade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Sent when signed in so the API can meter a delegate rather than an IP.
+          ...authorizationHeaders()
+        },
         body: JSON.stringify({
           speech: currentDrill.full_speech,
           poi: poi,
           is_solutions_only: mode === 'single',
           timed_out: clockExpired
-        })
+        }),
+        signal: controller.signal
       });
 
       const data = await response.json().catch(() => null);
+      if (response.status === 401) {
+        // The API rejected the stored credential: expired, revoked, or minted for
+        // another app. Drop it so the card stops claiming a signed-in account,
+        // and say why rather than showing the generic failure line.
+        signOut();
+        throw new Error('Your session expired. Please sign in again.');
+      }
       if (!response.ok) {
         throw new Error(describeApiError(data, response.status));
       }
@@ -412,11 +507,17 @@ export default function App() {
         setFormExiting(false);
       }, 300);
     } catch (error) {
-      setSubmitError(error.message || 'Error connecting to Chair API.');
+      const aborted = Boolean(error) && error.name === 'AbortError';
+      setSubmitError(
+        aborted
+          ? 'The chair took too long to answer. Please try again.'
+          : error.message || 'Error connecting to Chair API.'
+      );
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
-  }, [clockExpired, currentDrill, currentIndex, loading, mode, poi]);
+  }, [clockExpired, currentDrill, currentIndex, loading, mode, poi, signOut]);
 
   const handleSubmit = () => submitPoi();
 
@@ -451,11 +552,15 @@ export default function App() {
     if (graded.length) {
       const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
       const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
-      saveSessionResult({
-        topic: topics.length === 1 ? topics[0] : `${topics.length} topics`,
-        // One decimal: the list shows "7.4/10", and a whole average stays "8".
-        score: Math.round((total / graded.length) * 10) / 10
-      });
+      saveSessionResult(
+        {
+          topic: topics.length === 1 ? topics[0] : `${topics.length} topics`,
+          // One decimal: the list shows "7.4/10", and a whole average stays "8".
+          score: Math.round((total / graded.length) * 10) / 10
+        },
+        // Signed-in delegates keep a bucket per account; a guest uses the shared one.
+        session?.sub
+      );
     }
     setSessionComplete(true);
   };
@@ -489,7 +594,7 @@ export default function App() {
     setFormExiting(false);
     setSubmitError('');
     autoSubmittedRef.current = false;
-    setTimeLeft(repSeconds);
+    startClock();
   };
 
   const handleStartSession = () => {
@@ -519,7 +624,12 @@ export default function App() {
     setDrillError('');
     setLoadingDrill(true);
     autoSubmittedRef.current = false;
+    // No rep on screen from here on, so the countdown has nothing to point at.
+    deadlineRef.current = 0;
     setTimeLeft(0);
+    // The panel belongs to the drill; leaving with it open would re-open it on
+    // the next Play, over a screen the delegate had already dismissed.
+    setShowMenu(false);
   };
 
   const handlePoiChange = (value) => {
@@ -541,8 +651,13 @@ export default function App() {
       <Splash
         animOn={animOn}
         lowIntensity={lowIntensity}
+        session={session}
+        onSignIn={signIn}
+        onSignOut={signOut}
+        initialSettings={gameSettings}
         onStart={(next) => {
           setGameSettings(next);
+          persistLastSession(next);
           setCurrentView('game');
         }}
       />
@@ -554,6 +669,7 @@ export default function App() {
       <SettingsMenu
         open={showMenu}
         onToggle={() => setShowMenu(!showMenu)}
+        onClose={closeMenu}
         animOn={animOn}
         onAnimToggle={() => updateSetting('animOn', !animOn)}
         showTopic={showTopic}
@@ -596,6 +712,10 @@ export default function App() {
             <img className="app-logo" src={appIcon} alt="" width="24" height="24" aria-hidden="true" />
             <div
               className="progress-segments"
+              style={{
+                '--segment-min': `${segmentMetrics.min}px`,
+                '--segment-gap': `${segmentMetrics.gap}px`
+              }}
               role="progressbar"
               aria-label="Session progress"
               aria-valuemin={0}
@@ -636,9 +756,16 @@ export default function App() {
             </button>
             <div className="toggle-container">
               <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
-              <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
-                <div className="toggle-knob"></div>
-              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={mode === 'full'}
+                aria-label="Show the full speech instead of the solutions only"
+                className={`toggle-switch ${mode === 'full' ? 'active' : ''}`}
+                onClick={() => setMode(mode === 'full' ? 'single' : 'full')}
+              >
+                <span className="toggle-knob"></span>
+              </button>
               <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
             </div>
           </div>

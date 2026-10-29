@@ -9,18 +9,21 @@ import './index.css'
 import App from './App.jsx'
 import { GOOGLE_CLIENT_ID } from './lib/googleAuth.js'
 
-// A build without the client ID still renders — the button just cannot complete
-// a sign-in — so the missing variable is called out once here, where the person
-// running dev (or setting up a deploy) will actually see it.
-if (!GOOGLE_CLIENT_ID) {
-  console.warn(
-    'Missing VITE_GOOGLE_CLIENT_ID: Google sign-in is disabled. ' +
-      'Add it to frontend/.env (see frontend/.env.example) and restart the dev server.'
+// GOOGLE_CLIENT_ID falls back to this project's own web client, so the provider
+// always has an id to hand the script. The log is for the case where a fork
+// replaces that fallback and forgets the variable: sign-in would then fail at
+// Google's origin check with nothing in the console to explain it.
+if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+  console.info(
+    'VITE_GOOGLE_CLIENT_ID is not set for this build; using the project client ID. ' +
+      'Set it in frontend/.env (see frontend/.env.example) to use your own OAuth client.'
   )
 }
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
+    {/* The provider must sit above <App />: the splash screen's GoogleLogin button
+        is rendered deep inside it and needs the script the provider loads. */}
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <App />
     </GoogleOAuthProvider>

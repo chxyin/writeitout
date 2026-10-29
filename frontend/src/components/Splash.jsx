@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
-import { decodeGoogleCredential, GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
+import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
 // inside the file is blocked and "writeitout" would fall back to a system
@@ -113,21 +113,35 @@ function CustomNumberBox({ label, value, min, max, onCommit }) {
   );
 }
 
-export default function Splash({ onStart, animOn = true, lowIntensity = false }) {
-  // The Google session. `user` is the decoded ID token (name, email, picture);
-  // `isLoggedIn` is kept beside it rather than derived from it on purpose — a
-  // credential that arrives but cannot be decoded still signs the delegate in,
-  // and the profile card then falls back to the lettered avatar. Nothing is
-  // persisted, so a reload starts signed out.
-  const [user, setUser] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+export default function Splash({
+  onStart,
+  animOn = true,
+  lowIntensity = false,
+  // The Google session lives in App.jsx so the drill can use it too: the splash
+  // only draws it. `session` is null when signed out, and a credential that
+  // arrived but could not be decoded still counts as signed in — the profile card
+  // then falls back to its lettered avatar.
+  session = null,
+  onSignIn,
+  onSignOut,
+  // The reps/timer from the last session (or the app defaults). Used only to seed
+  // the pickers, so leaving a task and coming back keeps the same setup.
+  initialSettings = null
+}) {
+  const user = session;
+  const isLoggedIn = Boolean(session);
   // The one line under the button when Google reports a failure. Cleared on the
   // next attempt, so a stale error never sits next to a working button.
   const [authError, setAuthError] = useState('');
   // What Play will hand over. The numbers live here whichever segment is showing,
-  // so a typed pick and a preset pick are the same thing to App.jsx.
-  const [selectedReps, setSelectedReps] = useState(10);
-  const [selectedTimer, setSelectedTimer] = useState(0);
+  // so a typed pick and a preset pick are the same thing to App.jsx. The initial
+  // values come from the previous session rather than from constants.
+  const [selectedReps, setSelectedReps] = useState(
+    () => (initialSettings && initialSettings.reps) || 10
+  );
+  const [selectedTimer, setSelectedTimer] = useState(
+    () => (initialSettings && initialSettings.timer) || 0
+  );
   // Which row is sitting on its Custom segment. Kept apart from the numbers,
   // because a value alone cannot say whether "10" came from the preset or from the
   // box; a row that leaves Custom keeps the last typed number, so clicking between
@@ -136,15 +150,17 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
   const [timerCustom, setTimerCustom] = useState(false);
   // Recent Sessions, written by App.jsx when a session finishes. Read straight
   // into state — the splash is mounted afresh on every page load, so there is
-  // nothing to wait for — and then kept in step through the `storage` event,
-  // which is what fires when another tab saves a session.
-  const [recentSessions, setRecentSessions] = useState(loadSessionHistory);
+  // nothing to wait for — and then re-read whenever the account changes or another
+  // tab saves a session (`storage`).
+  const [recentSessions, setRecentSessions] = useState(() => loadSessionHistory(session?.sub));
 
   useEffect(() => {
-    const syncFromStorage = () => setRecentSessions(loadSessionHistory());
+    const syncFromStorage = () => setRecentSessions(loadSessionHistory(session?.sub));
+    // Signing in or out swaps the bucket, so re-read for the new account too.
+    syncFromStorage();
     window.addEventListener('storage', syncFromStorage);
     return () => window.removeEventListener('storage', syncFromStorage);
-  }, []);
+  }, [session?.sub]);
 
   // A preset segment writes its own number; Custom only flips the row over to the
   // box, leaving whatever number was already there until the box reports a new one.
@@ -158,30 +174,27 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
     if (value !== CUSTOM) setSelectedTimer(value);
   };
 
-  // Google hands back a signed ID token (a JWT) rather than a profile, so the
-  // claims are decoded here. The sign-in counts either way: if the token cannot
-  // be read the card shows its fallback avatar and "Delegate" instead of
-  // pretending the delegate is signed out.
+  // Google hands back a signed ID token (a JWT) rather than a profile. App owns
+  // the session: it decodes the claims, stores the credential with its expiry and
+  // hands the result back for the card. The sign-in counts either way: if the
+  // token cannot be read the card shows its fallback avatar and "Delegate"
+  // instead of pretending the delegate is signed out.
   const handleLoginSuccess = ({ credential }) => {
-    setUser(decodeGoogleCredential(credential));
-    setIsLoggedIn(true);
     setAuthError('');
+    onSignIn(credential);
   };
 
   const handleLoginError = () => {
-    setUser(null);
-    setIsLoggedIn(false);
     setAuthError('Google sign-in did not finish. Please try again.');
   };
 
-  // Signing out drops the profile and the flag together, then asks Google to
-  // forget the account as well. That call only reaches into the loaded GIS
-  // script, so it is guarded: signing out when Google's script never arrived
-  // must still sign the delegate out of this app.
+  // Signing out drops the stored session, then asks Google to forget the account
+  // as well. That call only reaches into the loaded GIS script, so it is guarded:
+  // signing out when Google's script never arrived must still sign the delegate
+  // out of this app.
   const handleSignOut = () => {
-    setUser(null);
-    setIsLoggedIn(false);
     setAuthError('');
+    onSignOut();
     try {
       googleLogout();
     } catch {
@@ -243,7 +256,7 @@ export default function Splash({ onStart, animOn = true, lowIntensity = false })
             </div>
           ) : (
             <div className="glass-card auth-card">
-              <div className="auth-subtitle">Sign in to save your progress and streaks</div>
+              <div className="auth-subtitle">Sign in to keep your history under your account</div>
               {/* Google draws its own button inside an iframe, so it cannot be
                   restyled from here — the wrapper gives it the card's width and
                   the same rounded corners as the app's other buttons. The button

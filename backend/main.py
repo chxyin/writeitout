@@ -55,9 +55,23 @@ MAX_SPEECH_CHARS = 6000
 # Safety ceiling only. There is deliberately no word cap: the trainer lets a
 # delegate argue at whatever length the point needs.
 MAX_POI_CHARS = 10000
+# A Google ID token is a few hundred characters; this is only a sanity ceiling.
+MAX_CREDENTIAL_CHARS = 8192
+
+# Google Sign-In. The client ID is public — it ships inside the web bundle — but
+# it is the audience every ID token must name, so it is also the backend's check
+# that a credential was minted for this app and not for somebody else's. The
+# default is this deployment's web client; set GOOGLE_CLIENT_ID to point a fork at
+# its own.
+GOOGLE_CLIENT_ID = os.getenv(
+    "GOOGLE_CLIENT_ID",
+    "802894837975-lmjp3uam5tjc641a8sfknsb59218mtoe.apps.googleusercontent.com",
+).strip()
+GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+AUTH_RATE_LIMIT_REQUESTS = int(os.getenv("AUTH_RATE_LIMIT_REQUESTS", "20"))
 
 DEFAULT_ALLOWED_ORIGINS = (
     "https://chxyin.github.io",
@@ -131,6 +145,7 @@ class SlidingWindowRateLimiter:
 
 
 grade_limiter = SlidingWindowRateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
+auth_limiter = SlidingWindowRateLimiter(AUTH_RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
 
 
 def client_identifier(request: Request) -> str:
@@ -142,6 +157,142 @@ def client_identifier(request: Request) -> str:
     if real_ip:
         return real_ip.strip()
     return request.client.host if request.client else "unknown"
+
+
+# --------------------------------------------------------------------------- #
+# Google Sign-In verification
+#
+# The browser holds the ID token; only the backend can say it is genuine. Two
+# verifiers are wired here because the deployment does not always have the same
+# packages available:
+#
+#   * google-auth verifies the RS256 signature locally against Google's cached
+#     certificates and checks aud / iss / exp. This is the production path.
+#   * If the package is missing (a stripped-down runtime), the tokeninfo endpoint
+#     is used instead. It is a network round trip and Google discourages it for
+#     high volume, but it verifies the signature server-side, so the same three
+#     claims can be checked and the endpoint keeps working.
+# --------------------------------------------------------------------------- #
+def _google_auth():
+    """The google-auth pieces, or None when that package is not installed."""
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+    except ImportError:  # pragma: no cover - depends on the runtime image
+        return None
+    return id_token, google_requests
+
+
+def _normalize_claims(claims: dict[str, Any]) -> dict[str, Any]:
+    """The profile fields the app uses, narrowed out of the token's claims."""
+    return {
+        "sub": str(claims.get("sub", "")),
+        "email": str(claims.get("email", "")),
+        "email_verified": claims.get("email_verified") is True,
+        "name": str(claims.get("name", "")),
+        "picture": str(claims.get("picture", "")),
+        "exp": int(claims.get("exp") or 0),
+    }
+
+
+def _verify_with_google_auth(credential: str, id_token, google_requests):
+    try:
+        claims = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=401,
+            detail="That Google credential is invalid or has expired. Please sign in again.",
+        ) from error
+    except Exception as error:  # certificate fetch failed: Google was unreachable
+        logger.warning("Could not reach Google to verify a credential")
+        raise HTTPException(
+            status_code=503, detail="The sign-in service is unavailable. Please try again."
+        ) from error
+    return claims
+
+
+def _verify_with_tokeninfo(credential: str):
+    try:
+        response = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": credential},
+            timeout=10,
+        )
+    except requests.RequestException as error:
+        logger.warning("Could not reach Google to verify a credential")
+        raise HTTPException(
+            status_code=503, detail="The sign-in service is unavailable. Please try again."
+        ) from error
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=401,
+            detail="That Google credential is invalid or has expired. Please sign in again.",
+        )
+    try:
+        claims = response.json()
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail="The sign-in service returned an error.") from error
+    if not isinstance(claims, dict):
+        raise HTTPException(status_code=503, detail="The sign-in service returned an error.")
+    return claims
+
+
+def verify_google_credential(credential: str) -> dict[str, Any]:
+    """Verify an ID token and return its profile claims, or raise 401."""
+    credential = (credential or "").strip()
+    if not credential:
+        raise HTTPException(status_code=401, detail="A Google credential is required.")
+
+    pieces = _google_auth()
+    if pieces is not None:
+        claims = _verify_with_google_auth(credential, *pieces)
+    else:
+        claims = _verify_with_tokeninfo(credential)
+
+    # Both verifiers already check the audience; this repeats it as a belt-and-
+    # braces guard and keeps the two paths honest about what they promise.
+    audience = claims.get("aud")
+    if isinstance(audience, list):
+        audience_ok = GOOGLE_CLIENT_ID in audience
+    else:
+        audience_ok = audience == GOOGLE_CLIENT_ID
+    if not audience_ok:
+        raise HTTPException(status_code=401, detail="That credential was issued for another app.")
+    if claims.get("iss") not in GOOGLE_ISSUERS:
+        raise HTTPException(status_code=401, detail="That credential was not issued by Google.")
+
+    normalized = _normalize_claims(claims)
+    if not normalized["sub"]:
+        raise HTTPException(status_code=401, detail="That credential identifies no account.")
+    return normalized
+
+
+def bearer_credential(request: Request) -> str:
+    """The `Authorization: Bearer …` value, or an empty string."""
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def optional_user(request: Request) -> dict[str, Any] | None:
+    """
+    The verified account behind a request, or None when it carries no credential.
+
+    `/api/grade` stays usable without an account on purpose — a delegate can
+    practise signed out — but a signed-in request is what lets the API meter a
+    person instead of an IP. A token that is present but bad is rejected rather
+    than ignored, so a broken session cannot silently fall back to the anonymous
+    path.
+    """
+    credential = bearer_credential(request)
+    if not credential:
+        return None
+    return verify_google_credential(credential)
 
 
 # --------------------------------------------------------------------------- #
@@ -205,6 +356,14 @@ class POIRequest(BaseModel):
     # stop mid-sentence. An older client never sends this key, which is why it
     # defaults to False rather than being required.
     timed_out: bool = False
+
+
+class GoogleCredentialRequest(BaseModel):
+    """Payload for /api/auth/google: the ID token the GIS button returned."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    credential: str = Field(min_length=1, max_length=MAX_CREDENTIAL_CHARS)
 
 
 SYSTEM_PROMPT = """
@@ -297,6 +456,37 @@ def _normalize_grade(grade: dict[str, Any]) -> dict[str, Any]:
 def health() -> dict[str, Any]:
     """Cheap liveness probe that never calls DeepSeek."""
     return {"status": "ok", "dataset_loaded": _speeches is not None}
+
+
+# --------------------------------------------------------------------------- #
+# Auth
+#
+# The frontend signs in with Google, then hands the ID token here. This is the
+# only place the token is checked: the browser can read its claims but cannot
+# prove them. A route that needs the account calls optional_user(request) (or
+# verify_google_credential directly) and gets the verified profile back.
+# --------------------------------------------------------------------------- #
+@app.post("/api/auth/google")
+def auth_google(payload: GoogleCredentialRequest, request: Request) -> dict[str, Any]:
+    retry_after = auth_limiter.retry_after(client_identifier(request))
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many sign-in attempts. Please try again in {int(retry_after)} seconds.",
+            headers={"Retry-After": str(int(retry_after))},
+        )
+    claims = verify_google_credential(payload.credential)
+    logger.info("Google sign-in verified for a delegate")
+    return claims
+
+
+@app.get("/api/me")
+def me(request: Request) -> dict[str, Any]:
+    """The verified account behind the request, or 401 when it carries none."""
+    claims = optional_user(request)
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Sign in to use this endpoint.")
+    return claims
 
 
 # --------------------------------------------------------------------------- #
@@ -403,7 +593,13 @@ def random_speech() -> dict[str, Any]:
 
 @app.post("/api/grade")
 def grade_poi(payload: POIRequest, request: Request) -> dict[str, Any]:
-    retry_after = grade_limiter.retry_after(client_identifier(request))
+    # A credential is optional — practising signed out is allowed — but a token
+    # that is present is verified here, and the verified account is what the rate
+    # limiter charges, so one delegate cannot be throttled by a shared campus IP.
+    user = optional_user(request)
+    retry_after = grade_limiter.retry_after(
+        user["sub"] if user else client_identifier(request)
+    )
     if retry_after is not None:
         logger.warning("Rate limit exceeded; rejected a grading request")
         raise HTTPException(
