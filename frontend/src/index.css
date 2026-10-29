@@ -1525,6 +1525,127 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .splash-screen .hero-logo { animation: none; }
 }
 
+/* ---------- Time's Up ----------
+   The countdown reaching 0:00 is the one moment in the app that must not be
+   quiet: it is the second the answer is taken away, and everything under here
+   stays untouchable until the chair has it. Full-bleed, the app's red at full
+   strength, and the largest type on the site. */
+.time-up {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  overflow: hidden;
+  background: #8E1209;
+  color: #fff;
+  text-align: center;
+  /* The whole wall is a target: while it is up, the drill underneath cannot be
+     clicked, typed into or submitted a second time. */
+  pointer-events: auto;
+  animation: timeUpIn 0.22s var(--ease-out-premium) both;
+}
+.time-up.is-leaving {
+  animation: timeUpOut 0.62s var(--ease-out-premium) both;
+  pointer-events: none;
+}
+
+/* The colour wash: a hot centre, a deep edge, and the app's own 20px grid kept
+   but pushed down to a whisper so the card still belongs to this product. */
+.time-up-wash {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(circle at 50% 42%, #FF5A45 0%, #D3281B 42%, #95160C 74%, #5E0A04 100%),
+    linear-gradient(transparent 0, transparent 100%);
+  background-blend-mode: normal;
+  animation: timeUpPulse 2.4s ease-in-out infinite alternate;
+}
+.time-up-wash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 20px 20px;
+  mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
+}
+
+.time-up-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: min(92vw, 30ch);
+}
+.time-up-kicker {
+  font-size: clamp(0.7rem, 1.6vw, 0.9rem);
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+  animation: timeUpRise 0.4s var(--ease-out-premium) both;
+}
+.time-up-title {
+  display: block;
+  margin: 0.1em 0 0.15em;
+  font-size: clamp(4.5rem, 21vw, 15rem);
+  font-weight: 900;
+  line-height: 0.82;
+  letter-spacing: -0.045em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow:
+    0 0.02em 0 rgba(0, 0, 0, 0.18),
+    0 0.06em 0.18em rgba(0, 0, 0, 0.35);
+  animation: timeUpSlam 0.42s var(--ease-spring) both;
+}
+.time-up-copy {
+  margin-top: 1.4rem;
+  max-width: 34ch;
+  font-size: clamp(0.85rem, 1.6vw, 1rem);
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+  animation: timeUpRise 0.5s 0.12s var(--ease-out-premium) both;
+}
+
+@keyframes timeUpIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes timeUpOut {
+  from { opacity: 1; }
+  to { opacity: 0; visibility: hidden; }
+}
+@keyframes timeUpSlam {
+  0% { opacity: 0; transform: scale(1.32); }
+  60% { opacity: 1; transform: scale(0.965); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes timeUpRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes timeUpPulse {
+  from { transform: scale(1); filter: saturate(1); }
+  to { transform: scale(1.045); filter: saturate(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .time-up,
+  .time-up-wash,
+  .time-up-title,
+  .time-up-kicker,
+  .time-up-copy { animation: none; }
+}
+
 /* ---------- Recent Sessions: the rows that open ----------
    A session that exists in the database is a link to its own page; one that only
    ever lived in this browser's old list stays a plain row, because there is

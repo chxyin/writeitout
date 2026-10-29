@@ -34,6 +34,7 @@ import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
 import SessionDetail from './components/SessionDetail.jsx';
+import TimeUpOverlay from './components/TimeUpOverlay.jsx';
 import useBreakpoint from './hooks/useBreakpoint.js';
 import useViewportHeight from './hooks/useViewportHeight.js';
 import useRoute from './lib/route.js';
@@ -184,6 +185,10 @@ export default function App() {
   // Remaining seconds on the current rep when the splash screen asked for a
   // timer; 0 = the clock is off, or a timed rep has run out.
   const [timeLeft, setTimeLeft] = useState(0);
+  // null → the red "Time's Up!" card is not showing; 'in' → it is, and the clock
+  // for it is running; 'out' → it is fading. The rep's countdown reaches 0:00
+  // every time, so this is what makes that second visible.
+  const [timeUpPhase, setTimeUpPhase] = useState(null);
 
   // View routing. The splash screen collects the practice settings; the game view
   // is the drill loop below. gameSettings is what Play handed over — { reps, timer }
@@ -284,6 +289,9 @@ export default function App() {
   // only once per countdown — and the graded entry that comes back can never
   // re-trigger the submit that produced it.
   const autoSubmittedRef = useRef(false);
+  // True while a grade is in flight. The "Time's Up!" card reads it without
+  // subscribing to `loading`, so its own timer is not restarted by a re-render.
+  const submitPendingRef = useRef(false);
 
   const updateSetting = useCallback((key, value) => {
     setSettings((previous) => ({ ...previous, [key]: value }));
@@ -391,6 +399,7 @@ export default function App() {
       setPoi('');
       // First rep of a session: the splash screen's Timer value starts over.
       autoSubmittedRef.current = false;
+      setTimeUpPhase(null);
       startClock();
     } catch (error) {
       setDrillError(error.message);
@@ -444,6 +453,7 @@ export default function App() {
     // Same rule as a fresh rep: the countdown belongs to the rep on screen, and
     // its one automatic submit is available again.
     autoSubmittedRef.current = false;
+    setTimeUpPhase(null);
     startClock();
     if (exitTimer.current) clearTimeout(exitTimer.current);
   }, [history, startClock]);
@@ -520,6 +530,7 @@ export default function App() {
       }
       setPoi('');
       autoSubmittedRef.current = false;
+      setTimeUpPhase(null);
       startClock();
     } catch (error) {
       setDrillError(error.message);
@@ -545,6 +556,10 @@ export default function App() {
     if (!currentDrill || !poi || loading) return;
     setLoading(true);
     setSubmitError('');
+    // Read by the "Time's Up!" card, which stays up until the chair has
+    // answered (or until its own safety limit) — so the fade lands on the
+    // feedback rather than on a page that is still saying "Chair is Grading".
+    submitPendingRef.current = true;
     // The chair may take its time, but not forever: the backend gives DeepSeek 40
     // seconds, so a request that outlives this ceiling is lost, and without the
     // abort Submit would sit on "Chair is Grading..." until the page reloaded.
@@ -641,29 +656,59 @@ export default function App() {
       );
     } finally {
       clearTimeout(timeout);
+      submitPendingRef.current = false;
       setLoading(false);
     }
   }, [clockExpired, currentDrill, currentIndex, loading, mode, poi, session, signOut]);
 
   const handleSubmit = () => submitPoi();
 
-  // What the clock does at zero: send whatever stands in the box, flagged so the
-  // chair knows the answer was cut off rather than finished. It runs once per
-  // countdown — the graded entry that comes back would otherwise re-trigger the
-  // very submit that produced it — and it never fires on an empty box, which has
-  // nothing to grade and would be rejected anyway. A manual retry still carries
-  // the flag while the clock reads zero, so a failed auto-submit is not silently
-  // graded as a finished answer.
+  // What the clock does at zero: announce it, then send whatever stands in the
+  // box, flagged so the chair knows the answer was cut off rather than finished.
+  // It runs once per countdown — the graded entry that comes back would otherwise
+  // re-trigger the very submit that produced it — and it never fires on an empty
+  // box, which has nothing to grade and would be rejected anyway; the card still
+  // appears and says so. A manual retry still carries the flag while the clock
+  // reads zero, so a failed auto-submit is not silently graded as a finished
+  // answer.
   useEffect(() => {
     if (!repSeconds || showFeedback || sessionComplete || !currentDrill) return;
     if (!clockExpired || autoSubmittedRef.current) return;
     autoSubmittedRef.current = true;
+    setTimeUpPhase('in');
     if (!poi.trim()) return;
     // Queued rather than called here: the submit opens with a state update, and
     // an effect body must not start one. The ref above still bounds it to a
     // single call per countdown.
     queueMicrotask(() => submitPoi());
   }, [repSeconds, showFeedback, sessionComplete, currentDrill, clockExpired, poi, submitPoi]);
+
+  // How long the red card stays up. It runs for three seconds, then fades; if the
+  // chair has still not answered by then it holds on (up to a hard 8s, so a hung
+  // request cannot trap the delegate on a red screen) and lifts the moment the
+  // feedback exists — which is what "fade when the grading appears" means.
+  useEffect(() => {
+    if (!timeUpPhase) return undefined;
+
+    if (timeUpPhase === 'out') {
+      const done = setTimeout(() => setTimeUpPhase(null), 620);
+      return () => clearTimeout(done);
+    }
+
+    const openedAt = Date.now();
+    let handle;
+    const tick = () => {
+      const elapsed = Date.now() - openedAt;
+      const settled = !submitPendingRef.current || elapsed >= 8000;
+      if (elapsed >= 3000 && settled) {
+        setTimeUpPhase('out');
+        return;
+      }
+      handle = setTimeout(tick, 120);
+    };
+    handle = setTimeout(tick, 3000);
+    return () => clearTimeout(handle);
+  }, [timeUpPhase]);
 
 
   /**
@@ -726,6 +771,7 @@ export default function App() {
     setFormExiting(false);
     setSubmitError('');
     autoSubmittedRef.current = false;
+    setTimeUpPhase(null);
     startClock();
   };
 
@@ -795,6 +841,7 @@ export default function App() {
     setDrillError('');
     setLoadingDrill(true);
     autoSubmittedRef.current = false;
+    setTimeUpPhase(null);
     // No rep on screen from here on, so the countdown has nothing to point at.
     deadlineRef.current = 0;
     setTimeLeft(0);
@@ -1030,6 +1077,15 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Above the shell, not inside it: the clock running out is the one moment
+          the whole page should stop being usable. The card owns no timer — App
+          does — so leaving the drill mid-fade cannot strand a timeout. */}
+      <TimeUpOverlay
+        phase={timeUpPhase}
+        sending={loading}
+        hasAnswer={Boolean(poi.trim())}
+      />
     </>
   );
 }
