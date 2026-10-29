@@ -79,6 +79,11 @@ class Store:
     def create_session(self, sub: str, reps_target: int, seconds_per_rep: int) -> str:
         raise NotImplementedError
 
+    def session_owned_by(self, sub: str, session_id: str) -> bool:
+        """True when this account owns the row. A rep is only writable into its
+        own session, so one delegate cannot post into another's."""
+        raise NotImplementedError
+
     def finish_session(
         self,
         sub: str,
@@ -224,6 +229,11 @@ class MemoryStore(Store):
                 "topic": None,
             }
         return session_id
+
+    def session_owned_by(self, sub: str, session_id: str) -> bool:
+        with self._lock:
+            session = self._sessions.get(session_id)
+        return bool(session and session["user_sub"] == sub)
 
     def finish_session(
         self,
@@ -480,6 +490,14 @@ class PostgresStore(Store):
                 (session_id, sub, reps_target, seconds_per_rep),
             )
         return session_id
+
+    def session_owned_by(self, sub: str, session_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select 1 as ok from practice_sessions where id = %s and user_sub = %s",
+                (session_id, sub),
+            ).fetchone()
+        return row is not None
 
     def finish_session(
         self,

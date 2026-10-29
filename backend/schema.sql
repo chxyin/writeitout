@@ -39,8 +39,15 @@ create table if not exists practice_sessions (
   seconds_per_rep integer not null default 0,
   active_seconds  integer not null default 0,
   avg_score       numeric(3,1),
-  completed       boolean not null default false
+  completed       boolean not null default false,
+  -- The topic(s) the session covered, written when it is closed out. It lives on
+  -- the session so the history list is one row per session, not a join over reps.
+  topic           text
 );
+
+-- Databases created before `topic` existed need it added: `create table if not
+-- exists` is a no-op on an existing table, so this is the migration.
+alter table practice_sessions add column if not exists topic text;
 
 -- One graded POI. The id comes from the client so a retried request cannot
 -- double-count a rep.

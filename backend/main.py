@@ -14,6 +14,7 @@ import random
 import re
 import threading
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -160,6 +161,9 @@ class SlidingWindowRateLimiter:
 
 grade_limiter = SlidingWindowRateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
 auth_limiter = SlidingWindowRateLimiter(AUTH_RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
+# Events are unauthenticated, so they get a budget of their own: 60 batches a
+# minute is far more than the app sends and far less than a spammer wants.
+event_limiter = SlidingWindowRateLimiter(60, RATE_LIMIT_WINDOW_SECONDS)
 
 
 def client_identifier(request: Request) -> str:
@@ -471,6 +475,18 @@ class StorageModeRequest(BaseModel):
     mode: str = Field(pattern="^(off|redacted|full)$")
 
 
+def _session_id(raw: str) -> str:
+    """A path parameter as a canonical UUID, or 404.
+
+    Without this a malformed id reaches Postgres and comes back as a 500 from a
+    uuid cast, which looks like an outage rather than a bad request.
+    """
+    try:
+        return str(uuid.UUID(raw))
+    except (ValueError, AttributeError, TypeError) as error:
+        raise HTTPException(status_code=404, detail="Unknown practice session.") from error
+
+
 def _iso(value: Any) -> Any:
     return value.isoformat() if hasattr(value, "isoformat") else value
 
@@ -672,7 +688,7 @@ def finish_session(session_id: str, payload: SessionFinishRequest, request: Requ
     user = require_user(request)
     get_store().finish_session(
         user["sub"],
-        session_id,
+        _session_id(session_id),
         reps_done=payload.reps_done,
         avg_score=payload.avg_score,
         completed=payload.completed,
@@ -684,9 +700,15 @@ def finish_session(session_id: str, payload: SessionFinishRequest, request: Requ
 @app.post("/api/sessions/{session_id}/reps")
 def add_rep(session_id: str, payload: RepRequest, request: Request) -> dict[str, Any]:
     user = require_user(request)
-    get_store().add_rep(
+    store = get_store()
+    owned = _session_id(session_id)
+    # A rep belongs to its session, and a session belongs to one account. Without
+    # this check a valid token could post reps into somebody else's session.
+    if not store.session_owned_by(user["sub"], owned):
+        raise HTTPException(status_code=404, detail="Unknown practice session.")
+    store.add_rep(
         user["sub"],
-        session_id,
+        owned,
         rep_id=payload.id,
         drill_id=payload.drill_id,
         topic=payload.topic,
@@ -746,13 +768,28 @@ def activity(payload: ActivityRequest, request: Request) -> dict[str, Any]:
     """One visible minute on the app. The client sends this from a timer that is
     paused while the tab is hidden, so idle time never counts as practice."""
     user = require_user(request)
-    get_store().add_tick(user["sub"], payload.session_id)
+    # The column is a uuid: a stale or malformed id must not turn a heartbeat into
+    # a 500, so it degrades to "no session".
+    session_id = None
+    if payload.session_id:
+        try:
+            session_id = _session_id(payload.session_id)
+        except HTTPException:
+            session_id = None
+    get_store().add_tick(user["sub"], session_id)
     return {"ok": True}
 
 
 @app.post("/api/events")
 def ingest_events(payload: EventBatch, request: Request) -> dict[str, Any]:
     """Batched product events. Guests are allowed; a signed-in send is attributed."""
+    retry_after = event_limiter.retry_after(client_identifier(request))
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many events.",
+            headers={"Retry-After": str(int(retry_after))},
+        )
     user = optional_user(request)
     get_store().add_events(
         user["sub"] if user else None,
