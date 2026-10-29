@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
-from store import STORAGE_MODES, get_store
+from store import STORAGE_MODES, get_store, store_source
 
 load_dotenv()
 
@@ -598,10 +598,15 @@ def _normalize_grade(grade: dict[str, Any]) -> dict[str, Any]:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     """Cheap liveness probe that never calls DeepSeek."""
+    store = get_store()
     return {
         "status": "ok",
         "dataset_loaded": _speeches is not None,
-        "store": get_store().backend,
+        "store": store.backend,
+        # Which environment variable the store was built from — a name, never the
+        # value — so a deployment that is still on the memory store is obvious.
+        "store_source": store_source(),
+        "database_ok": store.ping(),
     }
 
 

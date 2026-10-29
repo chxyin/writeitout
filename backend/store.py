@@ -127,6 +127,11 @@ class Store:
     def set_storage_mode(self, mode: str) -> None:
         raise NotImplementedError
 
+    # -- health ------------------------------------------------------------- #
+    def ping(self) -> bool:
+        """True when the backing store actually answers."""
+        return True
+
     # -- helpers ------------------------------------------------------------ #
     def should_store_answers(self, sub: str) -> bool:
         if self.storage_mode() != "full":
@@ -636,25 +641,87 @@ class PostgresStore(Store):
                 (json.dumps({"mode": mode}),),
             )
 
+    def ping(self) -> bool:
+        """A short, timeout-bounded probe: health must answer even when the DB is
+        unreachable."""
+        try:
+            with self._psycopg.connect(
+                self.dsn, connect_timeout=3, row_factory=self._dict_row
+            ) as conn:
+                conn.execute("select 1")
+            return True
+        except Exception:  # noqa: BLE001 - any failure means "not healthy"
+            return False
+
 
 _store: Store | None = None
 _store_lock = threading.Lock()
 
+# The Vercel ↔ Supabase integration does not set DATABASE_URL; it injects a
+# handful of POSTGRES_* names. Pooled first — serverless functions must not open a
+# direct connection per invocation.
+DSN_ENV_NAMES = (
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "SUPABASE_DB_URL",
+)
+
+# libpq rejects connection options it does not know, and the URLs the Supabase
+# integration hands out carry Prisma's `pgbouncer=true` and friends.
+PRISMA_ONLY_PARAMS = {
+    "pgbouncer",
+    "connection_limit",
+    "pool_timeout",
+    "schema",
+    "statement_cache_size",
+    "sslmode_require",
+}
+
+# Which variable the live store was built from, exposed on /api/health so a
+# misconfigured deployment is obvious without reading logs.
+DSN_SOURCE: str | None = None
+
+
+def sanitize_dsn(dsn: str) -> str:
+    """Make a Supabase/Vercel URL acceptable to libpq."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(dsn.strip())
+    query = [(key, value) for key, value in parse_qsl(parts.query) if key not in PRISMA_ONLY_PARAMS]
+    if parts.hostname and "supabase" in parts.hostname:
+        if not any(key == "sslmode" for key, _ in query):
+            query.append(("sslmode", "require"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def dsn_from_env() -> tuple[str, str | None]:
+    """The first configured connection string, and the name it came from."""
+    for name in DSN_ENV_NAMES:
+        value = os.getenv(name, "").strip()
+        if value:
+            return sanitize_dsn(value), name
+    return "", None
+
 
 def _build_store() -> Store:
-    dsn = os.getenv("DATABASE_URL", "").strip()
+    global DSN_SOURCE
+    dsn, source = dsn_from_env()
     if not dsn:
         return MemoryStore()
     try:
-        return PostgresStore(dsn)
+        store = PostgresStore(dsn)
     except ImportError:
         # A runtime without psycopg still serves the app; it just cannot remember.
         import logging
 
         logging.getLogger("writeitout").warning(
-            "DATABASE_URL is set but psycopg is not installed; falling back to memory"
+            "%s is set but psycopg is not installed; falling back to memory", source
         )
         return MemoryStore()
+    DSN_SOURCE = source
+    return store
 
 
 def get_store() -> Store:
@@ -664,3 +731,9 @@ def get_store() -> Store:
             if _store is None:
                 _store = _build_store()
     return _store
+
+
+def store_source() -> str | None:
+    """The environment variable the live store was built from (never its value)."""
+    get_store()
+    return DSN_SOURCE
