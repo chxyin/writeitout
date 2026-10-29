@@ -1528,8 +1528,12 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 /* ---------- Time's Up ----------
    The countdown reaching 0:00 is the one moment in the app that must not be
    quiet: it is the second the answer is taken away, and everything under here
-   stays untouchable until the chair has it. Full-bleed, the app's red at full
-   strength, and the largest type on the site. */
+   stays untouchable until the chair has it.
+
+   It is a frosted pane rather than a red screen. A white veil at 62% over a
+   blur lets the half-written answer stay visible underneath — the page you were
+   just on is still there, out of reach, which is the point — and the red moves
+   into the type, where the largest words on the site carry the alarm. */
 .time-up {
   position: fixed;
   inset: 0;
@@ -1539,28 +1543,41 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   justify-content: center;
   padding: 1.5rem;
   overflow: hidden;
-  background: #8E1209;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.32);
+  -webkit-backdrop-filter: blur(5px) saturate(0.95);
+  backdrop-filter: blur(5px) saturate(0.95);
+  color: #4A0F0A;
   text-align: center;
   /* The whole wall is a target: while it is up, the drill underneath cannot be
      clicked, typed into or submitted a second time. */
   pointer-events: auto;
   animation: timeUpIn 0.22s var(--ease-out-premium) both;
 }
+
+/* No blur at all on an older engine: the veil then has to do the hiding on its
+   own, so it thickens instead of leaving the answer legible but unblurred. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .time-up { background: rgba(255, 255, 255, 0.86); }
+}
 .time-up.is-leaving {
   animation: timeUpOut 0.62s var(--ease-out-premium) both;
   pointer-events: none;
 }
 
-/* The colour wash: a hot centre, a deep edge, and the app's own 20px grid kept
-   but pushed down to a whisper so the card still belongs to this product. */
+/* The colour wash: a white bloom behind the words so they never sit on a busy
+   half-finished sentence, a breath of red at the rim so the pane still reads as
+   the clock rather than a plain frosted sheet, and the app's own 20px grid kept
+   in red at a whisper so the card belongs to this product. */
 .time-up-wash {
   position: absolute;
   inset: -10%;
-  background:
-    radial-gradient(circle at 50% 42%, #FF5A45 0%, #D3281B 42%, #95160C 74%, #5E0A04 100%),
-    linear-gradient(transparent 0, transparent 100%);
-  background-blend-mode: normal;
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(255, 255, 255, 0.82) 0%,
+    rgba(255, 255, 255, 0.66) 30%,
+    rgba(255, 255, 255, 0.24) 58%,
+    rgba(200, 30, 20, 0.1) 100%
+  );
   animation: timeUpPulse 2.4s ease-in-out infinite alternate;
 }
 .time-up-wash::after {
@@ -1568,8 +1585,8 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+    linear-gradient(rgba(200, 30, 20, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200, 30, 20, 0.1) 1px, transparent 1px);
   background-size: 20px 20px;
   mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
   -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
@@ -1589,7 +1606,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   font-weight: 800;
   letter-spacing: 0.34em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.78);
+  color: #B3261E;
   animation: timeUpRise 0.4s var(--ease-out-premium) both;
 }
 .time-up-title {
@@ -1600,10 +1617,10 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   line-height: 0.82;
   letter-spacing: -0.045em;
   text-transform: uppercase;
-  color: #fff;
+  color: #C2181B;
   text-shadow:
-    0 0.02em 0 rgba(0, 0, 0, 0.18),
-    0 0.06em 0.18em rgba(0, 0, 0, 0.35);
+    0 0.02em 0 rgba(255, 255, 255, 0.7),
+    0 0.05em 0.2em rgba(120, 10, 5, 0.16);
   animation: timeUpSlam 0.42s var(--ease-spring) both;
 }
 .time-up-copy {
@@ -1612,7 +1629,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   font-size: clamp(0.85rem, 1.6vw, 1rem);
   font-weight: 600;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.82);
+  color: #5B1710;
   animation: timeUpRise 0.5s 0.12s var(--ease-out-premium) both;
 }
 

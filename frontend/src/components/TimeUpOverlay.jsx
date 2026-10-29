@@ -1,10 +1,11 @@
 /**
  * The clock hits zero.
  *
- * A full-screen red card that says, in the largest type in the app, that the rep
- * is over — because the moment is otherwise silent: the countdown simply reaches
- * 0:00 and the page carries on. It covers the whole shell for three seconds
- * while the answer that is on the page goes to the chair, then lifts to reveal
+ * A full-screen frosted pane that says, in the largest type in the app, that the
+ * rep is over — because the moment is otherwise silent: the countdown simply
+ * reaches 0:00 and the page carries on. The white veil blurs the drill rather
+ * than hiding it, so the answer that is no longer yours stays in view underneath
+ * while it goes to the chair; three seconds later the pane lifts to reveal
  * either the grading or the feedback card.
  *
  * It is deliberately a wall, not a message: nothing under it can be clicked, so
