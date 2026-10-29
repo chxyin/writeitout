@@ -252,7 +252,7 @@ class MemoryStore(Store):
             session["reps_done"] = reps_done
             session["avg_score"] = avg_score
             session["completed"] = completed
-            session["topic"] = topic
+            session["topic"] = topic or session["topic"]
             session["ended_at"] = datetime.now(HK)
 
     def add_rep(
@@ -513,7 +513,10 @@ class PostgresStore(Store):
             conn.execute(
                 """
                 update practice_sessions set
-                    reps_done = %s, avg_score = %s, completed = %s, topic = %s, ended_at = now()
+                    reps_done = %s, avg_score = %s, completed = %s,
+                    -- A close without a topic (the unload flush, an older client)
+                    -- must not erase one an earlier write already stored.
+                    topic = coalesce(%s, topic), ended_at = now()
                 where id = %s and user_sub = %s
                 """,
                 (reps_done, avg_score, completed, topic, session_id, sub),

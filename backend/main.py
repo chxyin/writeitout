@@ -115,7 +115,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    # PATCH is how a session is closed out (finished, exited, or flushed on
+    # unload). Without it the preflight failed and every close request was
+    # dropped by the browser — the session row stayed open with no topic and no
+    # score, which is why the history showed a row of "Ended early".
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["*"],
     max_age=600,
 )

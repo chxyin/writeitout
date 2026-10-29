@@ -123,3 +123,23 @@ create index if not exists events_created_idx on events (created_at desc);
 create index if not exists events_name_created_idx on events (name, created_at desc);
 create index if not exists ticks_created_idx on activity_ticks (created_at desc);
 create index if not exists ticks_user_created_idx on activity_ticks (user_sub, created_at desc);
+
+-- Repair: a session whose close request never arrived (the browser dropped every
+-- PATCH before CORS allowed it) still has its reps, so the summary can be
+-- rebuilt from them. Idempotent — once topic is filled the row is skipped.
+update practice_sessions s
+set topic = coalesce(s.topic, (
+        select r.topic from reps r
+        where r.session_id = s.id and r.topic is not null
+        order by r.created_at limit 1
+    )),
+    avg_score = coalesce(s.avg_score, (
+        select round(avg(r.score)::numeric, 1) from reps r where r.session_id = s.id
+    )),
+    reps_done = case
+        when s.reps_done = 0 then (select count(*) from reps r where r.session_id = s.id)
+        else s.reps_done
+    end,
+    ended_at = coalesce(s.ended_at, now())
+where s.topic is null
+  and exists (select 1 from reps r where r.session_id = s.id);
