@@ -22,7 +22,10 @@ class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function request(
+  path,
+  { method = 'GET', body, timeoutMs = DEFAULT_TIMEOUT_MS, keepalive = false } = {}
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -33,6 +36,9 @@ async function request(path, { method = 'GET', body, timeoutMs = DEFAULT_TIMEOUT
         ...authorizationHeaders()
       },
       body: body ? JSON.stringify(body) : undefined,
+      // A keepalive request is allowed to outlive the document, which is what
+      // lets a save finish while the tab is closing.
+      keepalive,
       signal: controller.signal
     });
     const data = await response.json().catch(() => null);

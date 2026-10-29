@@ -19,12 +19,15 @@ import { HISTORY_STORAGE_KEY, loadSessionHistory, saveSessionResult } from './li
 import useAuthSession, { authorizationHeaders } from './lib/auth.js';
 import { API_BASE_URL } from './lib/api.js';
 import {
-  finishPracticeSession,
+  beginPracticeSession,
+  closeOrphanedSession,
+  currentSessionId,
+  endPracticeSession,
+  flushSessionOnHide,
   importLocalHistory,
   recordRep,
   repId,
-  sendActivity,
-  startPracticeSession
+  sendActivity
 } from './lib/practice.js';
 import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
@@ -252,9 +255,9 @@ export default function App() {
   const { topOffset, bottomOffset, textSize, cardWidth } = settings;
   const closeMenu = useCallback(() => setShowMenu(false), []);
   const exitTimer = useRef(null);
-  // The database row for the session on screen. Null while signed out, or until
-  // the start call answers; every write is a no-op without it.
-  const sessionIdRef = useRef(null);
+  // Bumped whenever the account's history may have changed (a session closed, a
+  // local import finished), so the splash refetches instead of showing a stale list.
+  const [historyVersion, setHistoryVersion] = useState(0);
   // When the rep on screen runs out, as an absolute epoch millisecond. The clock
   // reads this rather than counting its own ticks: a backgrounded tab throttles
   // timers to one a minute (and iOS suspends them), which used to hand back
@@ -297,6 +300,24 @@ export default function App() {
     (total, entry) => total + (entry.feedback ? 1 : 0),
     0
   );
+
+  // The completion card's summary: how many reps actually earned a score, their
+  // average, and the topic(s) they covered.
+  const gradedEntries = history.filter((entry) => entry.feedback);
+  const sessionAverage = gradedEntries.length
+    ? Math.round(
+        (gradedEntries.reduce((sum, entry) => sum + entry.feedback.score, 0) /
+          gradedEntries.length) *
+          10
+      ) / 10
+    : null;
+  const sessionTopics = [...new Set(gradedEntries.map((entry) => entry.drill.topic))];
+  const sessionLabel =
+    sessionTopics.length === 0
+      ? ''
+      : sessionTopics.length === 1
+        ? sessionTopics[0]
+        : `${sessionTopics.length} topics`;
 
   // The rep's clock has run out. Every load path resets timeLeft to repSeconds,
   // so a zero here can only mean a timed rep really expired — never the off
@@ -557,10 +578,11 @@ export default function App() {
         )
       );
 
-      // Persist the rep while the cost trail is still in hand. Fire-and-forget:
-      // the delegate has their feedback whether or not the write lands.
+      // Persist the rep while the cost trail is still in hand. The recorder queues
+      // it if the session row is still being created. Fire-and-forget: the
+      // delegate has their feedback whether or not the write lands.
       if (session) {
-        recordRep(sessionIdRef.current, {
+        recordRep({
           id: repId(),
           drill_id: String(currentDrill.id || currentDrill.topic || 'unknown'),
           topic: currentDrill.topic || null,
@@ -624,30 +646,25 @@ export default function App() {
    */
   const completeSession = () => {
     const graded = history.filter((entry) => entry.feedback);
-    if (graded.length) {
-      const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
-      const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
-      const average = Math.round((total / graded.length) * 10) / 10;
-      const label = topics.length === 1 ? topics[0] : `${topics.length} topics`;
-      saveSessionResult(
-        {
-          topic: label,
-          // One decimal: the list shows "7.4/10", and a whole average stays "8".
-          score: average
-        },
-        // Signed-in delegates keep a bucket per account; a guest uses the shared one.
-        session?.sub
-      );
-      if (session) {
-        finishPracticeSession(sessionIdRef.current, {
-          repsDone: graded.length,
-          avgScore: average,
-          completed: true,
-          topic: label
-        });
-      }
-    }
-    sessionIdRef.current = null;
+    const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+    const average = graded.length ? Math.round((total / graded.length) * 10) / 10 : null;
+    const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
+    const label = topics.length === 0
+      ? 'Practice'
+      : topics.length === 1
+        ? topics[0]
+        : `${topics.length} topics`;
+
+    // One write path for both stores: the local bucket is the instant/offline
+    // view, the API row is the durable one.
+    if (graded.length) saveSessionResult({ topic: label, score: average }, session?.sub);
+    endPracticeSession({
+      repsDone: graded.length,
+      avgScore: average,
+      completed: true,
+      topic: label
+    }).finally(() => setHistoryVersion((version) => version + 1));
+
     setSessionComplete(true);
   };
 
@@ -690,47 +707,54 @@ export default function App() {
     setFormExiting(false);
     setSubmitError('');
     loadFirstRep();
-    // A new run out of the completion screen is a new row too.
-    sessionIdRef.current = null;
-    if (session && gameSettings) {
-      startPracticeSession(gameSettings).then((id) => {
-        sessionIdRef.current = id;
-      });
-    }
+    // A new run out of the completion screen opens a new row.
+    if (session && gameSettings) beginPracticeSession(gameSettings);
   };
 
-  // Play: remember the numbers, open the drill, and create the server-side row
-  // the reps will hang from. The row can arrive a moment later — a rep graded
-  // before it does is dropped rather than written against the wrong session.
+  // Play: remember the numbers, open the drill, and open the server-side row the
+  // reps will hang from. Reps graded before that row exists are queued by the
+  // recorder rather than dropped.
   const handleStart = (next) => {
     setGameSettings(next);
     persistLastSession(next);
     setCurrentView('game');
-    sessionIdRef.current = null;
-    if (session) {
-      startPracticeSession(next).then((id) => {
-        sessionIdRef.current = id;
-      });
-    }
+    if (session) beginPracticeSession(next);
   };
 
-  // "Exit Task" abandons the session and goes back to the splash screen. Nothing
-  // is added to Recent Sessions — only a finished session saves a score — but the
-  // server row is closed out as incomplete, so the abandoned time is still
-  // counted and the session does not look like it is still running.
-  const handleExitTask = () => {
+  // "Exit Task" leaves the drill for the splash. It ALWAYS closes the session:
+  // even one with no graded reps is written as an abandoned session, so the time
+  // and the attempt are not silently lost. The view switches only after the close
+  // request resolves, so the splash's refetch sees the new row.
+  const handleExitTask = async () => {
     if (exitTimer.current) clearTimeout(exitTimer.current);
-    if (session) {
-      const graded = history.filter((entry) => entry.feedback);
-      const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
-      finishPracticeSession(sessionIdRef.current, {
-        repsDone: graded.length,
-        avgScore: graded.length ? Math.round((total / graded.length) * 10) / 10 : null,
-        completed: false,
-        topic: graded.length ? graded[0].drill.topic : null
-      });
-    }
-    sessionIdRef.current = null;
+    const graded = history.filter((entry) => entry.feedback);
+    const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+    const average = graded.length ? Math.round((total / graded.length) * 10) / 10 : null;
+    const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
+    const label = topics.length === 0
+      ? 'Practice'
+      : topics.length === 1
+        ? topics[0]
+        : `${topics.length} topics`;
+
+    if (graded.length) saveSessionResult({ topic: label, score: average }, session?.sub);
+    // Wait for the close, but not forever: a slow network must not trap the
+    // delegate on the exit button. When the write lands later the history
+    // version bumps and the splash refetches.
+    const saving = endPracticeSession({
+      repsDone: graded.length,
+      avgScore: average,
+      completed: false,
+      topic: label
+    });
+    await Promise.race([
+      saving,
+      new Promise((resolve) => {
+        window.setTimeout(resolve, 1200);
+      })
+    ]);
+    saving.finally(() => setHistoryVersion((version) => version + 1));
+
     setCurrentView('splash');
     setHistory([]);
     setCurrentIndex(0);
@@ -756,11 +780,25 @@ export default function App() {
   useEffect(() => {
     if (currentView !== 'game' || !session) return undefined;
     const beat = () => {
-      if (document.visibilityState === 'visible') sendActivity(sessionIdRef.current);
+      if (document.visibilityState === 'visible') sendActivity(currentSessionId());
     };
     const timer = setInterval(beat, 60_000);
     return () => clearInterval(timer);
   }, [currentView, session]);
+
+  // A session left open by a reload or a closed tab is closed out the next time
+  // the app runs signed in, so it cannot stay "in progress" forever.
+  useEffect(() => {
+    if (!session) return;
+    closeOrphanedSession();
+  }, [session]);
+
+  // The page is going away mid-session: close the row with a keepalive request.
+  useEffect(() => {
+    const flush = () => flushSessionOnHide();
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
 
   const handlePoiChange = (value) => {
     setPoi(value);
@@ -785,6 +823,7 @@ export default function App() {
         onSignIn={handleSignIn}
         onSignOut={signOut}
         initialSettings={gameSettings}
+        historyVersion={historyVersion}
         onStart={handleStart}
       />
     );
@@ -869,7 +908,11 @@ export default function App() {
               </span>
             )}
           </div>
-          <div className="mode-row stagger-in stagger-2">
+          {/* The mode switch has nothing to switch once the session is over, and
+              leaving Exit Task in the row only invites an overlap in a narrow
+              window. The completion card carries its own Exit Task instead. */}
+          {!sessionComplete && (
+            <div className="mode-row stagger-in stagger-2">
             {/* The way out of a drill. Sits at the leading edge of the mode row,
                 so the Full Speech / Solutions Only switch stays centred. */}
             <button
@@ -894,11 +937,19 @@ export default function App() {
               </button>
               <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
             </div>
-          </div>
+            </div>
+          )}
         </div>
 
         {sessionComplete ? (
-          <SessionComplete onStart={handleStartSession} total={sessionLength} />
+          <SessionComplete
+            onStart={handleStartSession}
+            onExit={handleExitTask}
+            total={sessionLength}
+            completed={gradedCount}
+            average={sessionAverage}
+            topic={sessionLabel}
+          />
         ) : !showFeedback || !feedback ? (
           <DrillForm
             formExiting={formExiting}

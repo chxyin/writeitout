@@ -46,14 +46,17 @@ const REPS_RANGE = { min: 1, max: 100 };
 const TIMER_RANGE = { min: 1, max: 600 };
 
 // Same thresholds as the feedback card: 7+ green, 5-6 orange, below that red.
+// A session that ended without a graded rep has no score, so it gets no tone.
 function scoreTone(score) {
+  if (!Number.isFinite(score)) return 'score-none';
   if (score >= 7) return 'score-high';
   if (score >= 5) return 'score-mid';
   return 'score-low';
 }
 
-/** 8 → "8", 7.4 → "7.4". A session's average is not always a whole number. */
+/** 8 → "8", 7.4 → "7.4", null → "—". A session average is not always a whole number. */
 function formatScore(score) {
+  if (!Number.isFinite(score)) return '—';
   return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
@@ -127,7 +130,9 @@ export default function Splash({
   onSignOut,
   // The reps/timer from the last session (or the app defaults). Used only to seed
   // the pickers, so leaving a task and coming back keeps the same setup.
-  initialSettings = null
+  initialSettings = null,
+  // Bumped by App when a session has just been closed, so the list refetches.
+  historyVersion = 0
 }) {
   const user = session;
   const isLoggedIn = Boolean(session);
@@ -162,19 +167,19 @@ export default function Splash({
     window.addEventListener('storage', syncFromStorage);
 
     // Once signed in the database is the source of truth; the local bucket stays
-    // as the instant (and offline) view. An empty or failed fetch keeps what is
-    // already on screen rather than blanking the list.
+    // as the instant (and offline) view. A failed fetch keeps what is on screen;
+    // a successful one is used even when empty, because that is what the account
+    // actually has.
     if (session) {
       fetchHistory().then((rows) => {
-        if (cancelled || !rows || rows.length === 0) return;
+        if (cancelled || !rows) return;
         setRecentSessions(
-          rows
-            .filter((row) => Number.isFinite(row.score))
-            .map((row) => ({
-              topic: row.topic || 'Practice',
-              score: row.score,
-              date: row.date ? new Date(row.date).toLocaleDateString() : ''
-            }))
+          rows.map((row) => ({
+            topic: row.topic || (row.completed ? 'Practice' : 'Ended early'),
+            // An abandoned session has no average; show the dash, not a fake 0.
+            score: Number.isFinite(row.score) ? row.score : null,
+            date: row.date ? new Date(row.date).toLocaleDateString() : ''
+          }))
         );
       });
     }
@@ -183,7 +188,7 @@ export default function Splash({
       cancelled = true;
       window.removeEventListener('storage', syncFromStorage);
     };
-  }, [session]);
+  }, [session, historyVersion]);
 
   // A preset segment writes its own number; Custom only flips the row over to the
   // box, leaving whatever number was already there until the box reports a new one.
@@ -373,7 +378,8 @@ export default function Splash({
                         <span className="history-topic">{session.topic}</span>
                         <span className="history-date">{session.date}</span>
                         <span className={`history-score ${scoreTone(session.score)}`}>
-                          {formatScore(session.score)}/10
+                          {formatScore(session.score)}
+                          {Number.isFinite(session.score) ? '/10' : ''}
                         </span>
                       </div>
                     ))

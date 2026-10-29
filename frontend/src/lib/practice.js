@@ -2,13 +2,32 @@
  * Practice sessions, reps and history — the calls that move data between the
  * browser and the database.
  *
- * Every function is safe to fire and forget: a save that fails must never break
- * a practice session, so the failures resolve instead of throwing. The two
- * readers (`fetchHistory`, `fetchProfile`) return null on failure so the caller
- * can fall back to the local cache.
+ * A session is opened once (Play), written to as reps are graded, and closed
+ * exactly once — by finishing the session, by Exit Task, or by the page going
+ * away. The recorder below owns that lifecycle so no screen has to remember it:
+ *
+ *   * reps graded before the session row exists are queued, not dropped;
+ *   * the open session id is kept in localStorage, so a reload or a closed tab
+ *     leaves a marker that the next load closes out as an abandoned session;
+ *   * the close request uses `keepalive`, so navigating away cannot cancel it.
+ *
+ * Every function is safe to fire and forget: a failed save must never break a
+ * practice session, so failures resolve instead of throwing. The readers return
+ * null on failure so callers can fall back to the local cache.
  */
 
-import { api } from './api.js';
+import { api, API_BASE_URL } from './api.js';
+import { authorizationHeaders } from './auth.js';
+
+const OPEN_SESSION_KEY = 'writeitout:open-session';
+const MAX_QUEUED_REPS = 20;
+
+/** The session open in this tab, if any. */
+let sessionId = null;
+/** Reps graded before the row id arrived. */
+let queuedReps = [];
+/** What we know about the open session, for the pagehide fallback. */
+let progress = { repsDone: 0, average: null, topic: null };
 
 /** A stable id for a rep, so a retried save cannot be counted twice. */
 export function repId() {
@@ -16,6 +35,69 @@ export function repId() {
     return crypto.randomUUID();
   }
   return `rep-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function rememberOpenSession(id) {
+  try {
+    window.localStorage.setItem(OPEN_SESSION_KEY, JSON.stringify({ id, at: Date.now() }));
+  } catch {
+    // Private browsing: the in-memory id still works for this page.
+  }
+}
+
+function readOpenSession() {
+  try {
+    const raw = window.localStorage.getItem(OPEN_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed.id === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetOpenSession() {
+  try {
+    window.localStorage.removeItem(OPEN_SESSION_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+function closeBody({ repsDone = 0, avgScore = null, completed = false, topic = null }) {
+  return {
+    reps_done: Math.max(0, Math.min(1000, Math.round(repsDone) || 0)),
+    avg_score: Number.isFinite(avgScore) ? avgScore : null,
+    completed: Boolean(completed),
+    topic: topic ? String(topic).slice(0, 200) : null
+  };
+}
+
+function postRep(id, rep) {
+  if (!id) return;
+  api
+    .post(`/api/sessions/${id}/reps`, rep, { timeoutMs: 6000, keepalive: true })
+    .catch(() => {
+      // Analytics only: the grade itself already happened.
+    });
+}
+
+/**
+ * Close a session left open by a previous page load. Called before a new session
+ * starts and once when the app boots signed in.
+ */
+export async function closeOrphanedSession() {
+  const open = readOpenSession();
+  if (!open) return;
+  try {
+    await api.patch(`/api/sessions/${open.id}`, closeBody({ completed: false }), {
+      timeoutMs: 6000,
+      keepalive: true
+    });
+  } catch {
+    // It is abandoned either way; the marker is cleared below.
+  }
+  if (!sessionId) forgetOpenSession();
 }
 
 export async function startPracticeSession({ reps, timer }) {
@@ -30,35 +112,97 @@ export async function startPracticeSession({ reps, timer }) {
   }
 }
 
-export async function finishPracticeSession(sessionId, { repsDone, avgScore, completed, topic }) {
-  if (!sessionId) return;
+/** Open the row for a new session and flush anything graded before it existed. */
+export async function beginPracticeSession(settings) {
+  await closeOrphanedSession();
+  sessionId = null;
+  queuedReps = [];
+  progress = { repsDone: 0, average: null, topic: null };
+
+  const id = await startPracticeSession(settings);
+  if (!id) return null;
+
+  sessionId = id;
+  rememberOpenSession(id);
+  const pending = queuedReps;
+  queuedReps = [];
+  pending.forEach((rep) => postRep(id, rep));
+  return id;
+}
+
+/** Record one graded rep. Queued while the row id is still in flight. */
+export function recordRep(rep) {
+  progress.repsDone += 1;
+  if (rep && rep.topic) progress.topic = rep.topic;
+  if (!sessionId) {
+    if (queuedReps.length < MAX_QUEUED_REPS) queuedReps.push(rep);
+    return;
+  }
+  postRep(sessionId, rep);
+}
+
+/**
+ * Close the session. Always called — completion, Exit Task, and the completion
+ * card's own exit — so a session is never left dangling with a null score.
+ */
+export async function endPracticeSession({ repsDone, avgScore, completed, topic }) {
+  const open = readOpenSession();
+  const target = sessionId || (open ? open.id : null);
+  if (!target) {
+    forgetOpenSession();
+    return;
+  }
+
+  if (sessionId && queuedReps.length) {
+    const pending = queuedReps;
+    queuedReps = [];
+    pending.forEach((rep) => postRep(sessionId, rep));
+  }
+
   try {
-    await api.patch(`/api/sessions/${sessionId}`, {
-      reps_done: repsDone,
-      avg_score: Number.isFinite(avgScore) ? avgScore : null,
-      completed: Boolean(completed),
-      topic: topic ? topic.slice(0, 200) : null
+    await api.patch(`/api/sessions/${target}`, closeBody({ repsDone, avgScore, completed, topic }), {
+      timeoutMs: 6000,
+      keepalive: true
     });
   } catch {
     // The local history entry still records the session.
   }
+  if (sessionId === target) sessionId = null;
+  forgetOpenSession();
 }
 
-export async function recordRep(sessionId, rep) {
-  if (!sessionId) return;
+/**
+ * The page is going away: close the row without waiting for an answer.
+ * `keepalive` is what lets the request outlive the document.
+ */
+export function flushSessionOnHide() {
+  const open = readOpenSession();
+  const target = sessionId || (open ? open.id : null);
+  if (!target) return;
   try {
-    await api.post(`/api/sessions/${sessionId}/reps`, rep);
+    fetch(`${API_BASE_URL}/api/sessions/${target}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authorizationHeaders() },
+      body: JSON.stringify(closeBody({ ...progress, avgScore: progress.average, completed: false })),
+      keepalive: true
+    }).catch(() => {});
   } catch {
-    // Analytics only: the grade itself already happened.
+    // Nothing else can be done as the page unloads.
   }
+  forgetOpenSession();
 }
 
-export async function sendActivity(sessionId) {
+export async function sendActivity(sessionIdOrNull) {
   try {
-    await api.post('/api/activity', { session_id: sessionId || null }, { timeoutMs: 5000 });
+    await api.post('/api/activity', { session_id: sessionIdOrNull || null }, { timeoutMs: 5000 });
   } catch {
     // A dropped heartbeat only under-counts a minute of practice.
   }
+}
+
+/** The id of the session this tab is recording, for the heartbeat. */
+export function currentSessionId() {
+  return sessionId;
 }
 
 export async function sendEvents(events) {
