@@ -615,6 +615,7 @@ def health(verbose: bool = False) -> dict[str, Any]:
     }
     if verbose:
         body["database_error"] = store.ping_error()
+        body["schema_error"] = store.schema_error()
     return body
 
 

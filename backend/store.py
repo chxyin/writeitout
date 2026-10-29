@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import uuid
 from contextlib import contextmanager
@@ -40,6 +41,12 @@ if DEFAULT_STORAGE_MODE not in STORAGE_MODES:
 def today_hk() -> date:
     """The practice day in the app's own timezone, not the server's."""
     return datetime.now(HK).date()
+
+
+def _redact(error: Exception) -> str:
+    """A one-line reason with any credentials stripped out."""
+    message = f"{type(error).__name__}: {error}"
+    return re.sub(r"://[^@\s]*@", "://***@", message)[:200]
 
 
 def next_streak(last: date | None, current: int, today: date) -> int:
@@ -133,6 +140,9 @@ class Store:
         return True
 
     def ping_error(self) -> str | None:
+        return None
+
+    def schema_error(self) -> str | None:
         return None
 
     # -- helpers ------------------------------------------------------------ #
@@ -385,7 +395,7 @@ class PostgresStore(Store):
         self._migrate_lock = threading.Lock()
 
     @contextmanager
-    def _conn(self):
+    def _raw_conn(self):
         # prepare_threshold=None disables server-side prepared statements, which a
         # transaction-mode pooler (Supabase's port 6543) cannot reuse.
         with self._psycopg.connect(
@@ -396,6 +406,15 @@ class PostgresStore(Store):
         ) as conn:
             yield conn
 
+    @contextmanager
+    def _conn(self):
+        # Every query goes through here, so the tables exist before any of them
+        # can fail on a fresh database. ensure_schema talks to _raw_conn to avoid
+        # recursing back into this.
+        self.ensure_schema()
+        with self._raw_conn() as conn:
+            yield conn
+
     def ensure_schema(self) -> None:
         if self._migrated:
             return
@@ -403,7 +422,7 @@ class PostgresStore(Store):
             if self._migrated:
                 return
             sql = SCHEMA_FILE.read_text(encoding="utf-8")
-            with self._conn() as conn:
+            with self._raw_conn() as conn:
                 # The schema is plain DDL, so splitting on the statement terminator
                 # is enough; psycopg refuses multiple statements in one execute.
                 for statement in (part.strip() for part in sql.split(";")):
@@ -668,11 +687,19 @@ class PostgresStore(Store):
                 conn.execute("select 1")
             return None
         except Exception as error:  # noqa: BLE001 - any failure means "not healthy"
-            import re
+            return _redact(error)
 
-            message = f"{type(error).__name__}: {error}"
-            # A libpq error can echo the whole URL; never let the password out.
-            return re.sub(r"://[^@\s]*@", "://***@", message)[:200]
+    def schema_error(self) -> str | None:
+        """None once the tables are in place, else why they could not be created.
+
+        The schema is applied lazily, so a deployment can be connected to Postgres
+        and still be unusable until the first write. This makes that visible.
+        """
+        try:
+            self.ensure_schema()
+            return None
+        except Exception as error:  # noqa: BLE001
+            return _redact(error)
 
 
 _store: Store | None = None
