@@ -11,7 +11,7 @@
  * from a message, which is also why it handles being opened signed out.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import DrillForm from './DrillForm.jsx';
@@ -141,9 +141,14 @@ export default function SessionDetail({
   }, [status, detail]);
 
   // Every rep and every step starts at the top: a long speech would otherwise
-  // reopen scrolled to wherever the previous one ended.
+  // reopen scrolled to wherever the previous one ended. The scroller is this
+  // page itself — it is pinned to the viewport — not the window.
+  const pageRef = useRef(null);
   useEffect(() => {
-    window.scrollTo({ top: 0 });
+    const scroller = pageRef.current;
+    if (!scroller) return;
+    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top: 0 });
+    else scroller.scrollTop = 0;
   }, [index, step]);
 
   const reps = (detail && detail.reps) || [];
@@ -193,7 +198,7 @@ export default function SessionDetail({
   const goBack = goHome;
 
   return (
-    <div className="session-page">
+    <div className="session-page" ref={pageRef}>
       <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />
 
       <div className="app-container mode-full session-shell" data-tier={tier} data-orientation={orientation}>
