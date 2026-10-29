@@ -46,7 +46,7 @@ export default function FeedbackCard({
   // nothing left to grade, only somewhere to go next.
   frozen = false,
   backLabel = '← Back',
-  nextLabel = 'Next Rep →',
+  nextLabel = 'Next run →',
   nextDisabled = false
 }) {
   const [copied, setCopied] = useState(false);

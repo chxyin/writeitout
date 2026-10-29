@@ -19,7 +19,7 @@ export default function SessionComplete({
   exitLabel = 'Exit Task',
   startLabel = 'Start New Session'
 }) {
-  const reps = completed === 1 ? 'rep' : 'reps';
+  const runs = completed === 1 ? 'run' : 'runs';
   const finished = completed >= total;
 
   return (
@@ -34,13 +34,13 @@ export default function SessionComplete({
         <div className="session-complete-count">
           {completed}
           <span className="session-complete-total"> / {total}</span>
-          <span className="session-complete-unit">{reps}</span>
+          <span className="session-complete-unit">{runs}</span>
         </div>
 
         <p className="session-complete-copy">
           {average !== null
-            ? `Averaged ${average}/10 across ${completed} ${reps}.`
-            : `You graded no reps this session — the attempt is still saved.`}
+            ? `Averaged ${average}/10 across ${completed} ${runs}.`
+            : `You graded no runs this session — the attempt is still saved.`}
         </p>
 
         {topic && <p className="session-complete-topic">{topic}</p>}

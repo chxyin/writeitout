@@ -990,7 +990,7 @@ export default function App() {
               <span
                 className={`rep-timer ${timeLeft === 0 ? 'is-done' : ''}`.trim()}
                 role="timer"
-                title={`${repSeconds} seconds per rep`}
+                title={`${repSeconds} seconds per run`}
               >
                 {formatClock(timeLeft)}
               </span>

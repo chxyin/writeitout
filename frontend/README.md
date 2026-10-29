@@ -32,7 +32,7 @@ dependency:
 
 | Address | Screen |
 | --- | --- |
-| `/writeitout/` | the start screen (sign in, pick reps and timer, Play) |
+| `/writeitout/` | the start screen (sign in, pick runs and timer, Play) |
 | `/writeitout/#/session/<id>` | one past session, replayed |
 
 The session route is a hash because GitHub Pages serves files, not routes: a
@@ -42,7 +42,7 @@ the same URL when the page is opened cold.
 
 `#/session/<id>` shows the drill and the feedback card exactly as they were,
 frozen: the speech, the answer read-only, the score and the chair's verdict,
-with Prev/Next through the reps and the completion card at the end. Nothing can
+with Prev/Next through the runs and the completion card at the end. Nothing can
 be edited and no clock runs, because the session is over. Opening it signed out
 asks for the Google sign-in in place; a session belonging to another account is
 a 404.

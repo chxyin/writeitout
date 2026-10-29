@@ -16,7 +16,7 @@ export default function HistoryNav({ index, total, onPrev, onNext, canPrev, canN
         className="history-btn"
         onClick={onPrev}
         disabled={!canPrev}
-        title="Previous rep"
+        title="Previous run"
       >
         <span aria-hidden="true">&lt;</span> Prev
       </button>
@@ -28,7 +28,7 @@ export default function HistoryNav({ index, total, onPrev, onNext, canPrev, canN
         className="history-btn"
         onClick={onNext}
         disabled={!canNext}
-        title="Next rep"
+        title="Next run"
       >
         Next <span aria-hidden="true">&gt;</span>
       </button>

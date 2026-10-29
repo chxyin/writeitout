@@ -331,17 +331,17 @@ export default function Splash({
             <h2 className="card-title">Start a Practice</h2>
 
             <div className="setting-row">
-              <div className="setting-label">Reps</div>
+              <div className="setting-label">Runs</div>
               <div className="setting-control">
                 <SegmentedControl
-                  label="Reps"
+                  label="Runs"
                   options={REPS_OPTIONS}
                   value={repsCustom ? CUSTOM : selectedReps}
                   onChange={chooseReps}
                 />
                 {repsCustom && (
                   <CustomNumberBox
-                    label="reps"
+                    label="runs"
                     value={selectedReps}
                     min={REPS_RANGE.min}
                     max={REPS_RANGE.max}
@@ -361,7 +361,7 @@ export default function Splash({
                 />
                 {timerCustom && (
                   <CustomNumberBox
-                    label="seconds per rep"
+                    label="seconds per run"
                     value={selectedTimer}
                     min={TIMER_RANGE.min}
                     max={TIMER_RANGE.max}

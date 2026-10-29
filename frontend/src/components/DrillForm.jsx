@@ -66,7 +66,7 @@ export default function DrillForm({
                 <div className="prompt-scroll">"{activePrompt}"</div>
               ) : (
                 <div className="prompt-scroll prompt-missing">
-                  The speech was not saved with this rep.
+                  The speech was not saved with this run.
                 </div>
               )}
             </div>
@@ -90,7 +90,7 @@ export default function DrillForm({
                 // An empty box would read as "the delegate wrote nothing"; the
                 // truth is that the answer was never kept.
                 <div className="frozen-answer-missing">
-                  Your answer was not saved for this rep.
+                  Your answer was not saved for this run.
                 </div>
               ) : frozen ? (
                 // Read-only review: the answer grows to its own length. A
@@ -138,7 +138,7 @@ export default function DrillForm({
                 // A disabled red CTA the size of Submit reads as "press me". The
                 // truth is there is nothing behind it, so say that instead.
                 <div className="frozen-note">
-                  Only the score was kept for this rep — the chair&apos;s feedback was not
+                  Only the score was kept for this run — the chair&apos;s feedback was not
                   stored with it.
                 </div>
               )

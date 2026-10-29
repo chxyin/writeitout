@@ -223,7 +223,7 @@ export default function SessionDetail({
                 {sessionRow.seconds_per_rep > 0 && (
                   <>
                     <span className="session-meta-dot" aria-hidden="true">·</span>
-                    <span>{sessionRow.seconds_per_rep}s per rep</span>
+                    <span>{sessionRow.seconds_per_rep}s per run</span>
                   </>
                 )}
               </div>
@@ -303,18 +303,18 @@ export default function SessionDetail({
           </div>
         ) : reps.length === 0 ? (
           <div className="glass-card session-gate">
-            <h2 className="card-title">No reps were saved for this session</h2>
+            <h2 className="card-title">No runs were saved for this session</h2>
             <p className="session-gate-copy">
               {sessionRow && sessionRow.reps_done > 0
                 ? 'This session came from your old browser history, which only kept the summary — the speech, your answers and the chair’s feedback were never stored.'
-                : 'The session ended before a rep was submitted, so there is nothing to replay. The attempt is still in the totals.'}
+                : 'The session ended before a run was submitted, so there is nothing to replay. The attempt is still in the totals.'}
             </p>
             <button type="button" className="play-btn" onClick={goBack}>Back to the start</button>
           </div>
         ) : !rep ? (
           <div className="glass-card session-gate">
-            <h2 className="card-title">This rep is missing</h2>
-            <p className="session-gate-copy">The session has reps, but not this one.</p>
+            <h2 className="card-title">This run is missing</h2>
+            <p className="session-gate-copy">The session has runs, but not this one.</p>
             <button type="button" className="play-btn" onClick={goBack}>Back to the start</button>
           </div>
         ) : (
@@ -356,7 +356,7 @@ export default function SessionDetail({
                 historyIndex={index}
                 historyLength={reps.length}
                 backLabel="← Your answer"
-                nextLabel={index >= reps.length - 1 ? 'Session summary →' : 'Next rep →'}
+                nextLabel={index >= reps.length - 1 ? 'Session summary →' : 'Next run →'}
               />
             ) : (
               <DrillForm
