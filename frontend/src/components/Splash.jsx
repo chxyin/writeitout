@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
+import { fetchHistory } from '../lib/practice.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
@@ -155,12 +156,34 @@ export default function Splash({
   const [recentSessions, setRecentSessions] = useState(() => loadSessionHistory(session?.sub));
 
   useEffect(() => {
+    let cancelled = false;
     const syncFromStorage = () => setRecentSessions(loadSessionHistory(session?.sub));
-    // Signing in or out swaps the bucket, so re-read for the new account too.
     syncFromStorage();
     window.addEventListener('storage', syncFromStorage);
-    return () => window.removeEventListener('storage', syncFromStorage);
-  }, [session?.sub]);
+
+    // Once signed in the database is the source of truth; the local bucket stays
+    // as the instant (and offline) view. An empty or failed fetch keeps what is
+    // already on screen rather than blanking the list.
+    if (session) {
+      fetchHistory().then((rows) => {
+        if (cancelled || !rows || rows.length === 0) return;
+        setRecentSessions(
+          rows
+            .filter((row) => Number.isFinite(row.score))
+            .map((row) => ({
+              topic: row.topic || 'Practice',
+              score: row.score,
+              date: row.date ? new Date(row.date).toLocaleDateString() : ''
+            }))
+        );
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('storage', syncFromStorage);
+    };
+  }, [session]);
 
   // A preset segment writes its own number; Custom only flips the row over to the
   // box, leaving whatever number was already there until the box reports a new one.

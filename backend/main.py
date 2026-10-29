@@ -6,6 +6,7 @@ Endpoints:
     POST /api/grade          -> DeepSeek chair feedback for a user POI
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +23,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
+
+from store import STORAGE_MODES, get_store
 
 load_dotenv()
 
@@ -72,6 +75,17 @@ GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "12"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 AUTH_RATE_LIMIT_REQUESTS = int(os.getenv("AUTH_RATE_LIMIT_REQUESTS", "20"))
+
+# Admin access. One address by default; a comma-separated list for more.
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("ADMIN_EMAILS", "jasonluchunyin2010@gmail.com").split(",")
+    if email.strip()
+}
+
+# Analytics never stores an IP, only a salted hash, so two requests from one
+# network can be correlated without keeping the address.
+ANALYTICS_SALT = os.getenv("ANALYTICS_SALT", "writeitout").strip()
 
 DEFAULT_ALLOWED_ORIGINS = (
     "https://chxyin.github.io",
@@ -295,6 +309,31 @@ def optional_user(request: Request) -> dict[str, Any] | None:
     return verify_google_credential(credential)
 
 
+def require_user(request: Request) -> dict[str, Any]:
+    """The verified account, or 401. For everything that writes practice data."""
+    claims = optional_user(request)
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Sign in to save your practice data.")
+    return claims
+
+
+def is_admin(claims: dict[str, Any]) -> bool:
+    email = (claims.get("email") or "").strip().lower()
+    return bool(email) and email in ADMIN_EMAILS
+
+
+def require_admin(request: Request) -> dict[str, Any]:
+    claims = require_user(request)
+    if not is_admin(claims):
+        raise HTTPException(status_code=403, detail="This account is not an admin.")
+    return claims
+
+
+def hashed_client(request: Request) -> str:
+    """A stable per-network hash, never the address itself."""
+    return hashlib.sha256(f"{ANALYTICS_SALT}:{client_identifier(request)}".encode()).hexdigest()[:32]
+
+
 # --------------------------------------------------------------------------- #
 # Bundled speech dataset (read + parsed once per process)
 # --------------------------------------------------------------------------- #
@@ -364,6 +403,110 @@ class GoogleCredentialRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     credential: str = Field(min_length=1, max_length=MAX_CREDENTIAL_CHARS)
+
+
+# --------------------------------------------------------------------------- #
+# Practice data models
+#
+# Every field the client sends is bounded here: this is the write path for the
+# database, so an oversized or malformed body must fail before it reaches SQL.
+# --------------------------------------------------------------------------- #
+class SessionStartRequest(BaseModel):
+    reps_target: int = Field(ge=1, le=100)
+    seconds_per_rep: int = Field(ge=0, le=600)
+
+
+class SessionFinishRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    reps_done: int = Field(ge=0, le=1000)
+    avg_score: float | None = Field(default=None, ge=0, le=10)
+    completed: bool = False
+    topic: str | None = Field(default=None, max_length=200)
+
+
+class RepRequest(BaseModel):
+    """One graded rep. `id` comes from the client so a retry cannot double-count."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str = Field(min_length=8, max_length=64)
+    drill_id: str = Field(min_length=1, max_length=200)
+    topic: str | None = Field(default=None, max_length=200)
+    mode: str = Field(pattern="^(full|single)$")
+    score: float = Field(ge=0, le=10)
+    timed_out: bool = False
+    poi: str = Field(default="", max_length=MAX_POI_CHARS)
+    latency_ms: int | None = Field(default=None, ge=0, le=300_000)
+    prompt_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
+    completion_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
+    model: str | None = Field(default=None, max_length=64)
+
+
+class ActivityRequest(BaseModel):
+    session_id: str | None = Field(default=None, max_length=64)
+
+
+class EventItem(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    props: dict[str, Any] = Field(default_factory=dict)
+
+
+class EventBatch(BaseModel):
+    events: list[EventItem] = Field(min_length=1, max_length=50)
+
+
+class HistoryEntry(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    topic: str = Field(max_length=200)
+    score: float = Field(ge=0, le=10)
+
+
+class HistoryImport(BaseModel):
+    entries: list[HistoryEntry] = Field(min_length=1, max_length=100)
+
+
+class StorageModeRequest(BaseModel):
+    mode: str = Field(pattern="^(off|redacted|full)$")
+
+
+def _iso(value: Any) -> Any:
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _session_json(row: dict[str, Any]) -> dict[str, Any]:
+    """The shape the splash's Recent Sessions list already understands."""
+    score = row.get("avg_score")
+    return {
+        "id": str(row.get("id", "")),
+        "topic": row.get("topic") or "",
+        "score": float(score) if score is not None else None,
+        "date": _iso(row.get("started_at")),
+        "reps_done": row.get("reps_done") or 0,
+        "reps_target": row.get("reps_target") or 0,
+        "completed": bool(row.get("completed")),
+    }
+
+
+def _profile_json(delegate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "display_name": delegate.get("display_name") or "",
+        "email": delegate.get("email") or "",
+        "store_answers": bool(delegate.get("store_answers", True)),
+        "total_reps": int(delegate.get("total_reps") or 0),
+        "average_score": delegate.get("average_score"),
+        "best_score": (
+            float(delegate["best_score"]) if delegate.get("best_score") is not None else None
+        ),
+        "streak_days": int(delegate.get("streak_days") or 0),
+        "longest_streak": int(delegate.get("longest_streak") or 0),
+        "last_practice_on": _iso(delegate.get("last_practice_on")),
+        "active_seconds": int(delegate.get("active_seconds") or 0),
+        "reps_last_7_days": int(delegate.get("reps_last_7_days") or 0),
+        "reps_last_30_days": int(delegate.get("reps_last_30_days") or 0),
+        "created_at": _iso(delegate.get("created_at")),
+    }
 
 
 SYSTEM_PROMPT = """
@@ -455,7 +598,11 @@ def _normalize_grade(grade: dict[str, Any]) -> dict[str, Any]:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     """Cheap liveness probe that never calls DeepSeek."""
-    return {"status": "ok", "dataset_loaded": _speeches is not None}
+    return {
+        "status": "ok",
+        "dataset_loaded": _speeches is not None,
+        "store": get_store().backend,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -487,6 +634,135 @@ def me(request: Request) -> dict[str, Any]:
     if claims is None:
         raise HTTPException(status_code=401, detail="Sign in to use this endpoint.")
     return claims
+
+
+# --------------------------------------------------------------------------- #
+# Practice data
+#
+# Everything below writes or reads one account's practice record. The account
+# comes from the verified token, never from the body, so a delegate can only
+# touch their own rows.
+# --------------------------------------------------------------------------- #
+@app.post("/api/sessions")
+def start_session(payload: SessionStartRequest, request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    store = get_store()
+    # The row has to exist first: practice_sessions references delegates.
+    store.upsert_delegate(user)
+    session_id = store.create_session(user["sub"], payload.reps_target, payload.seconds_per_rep)
+    return {"session_id": session_id}
+
+
+@app.patch("/api/sessions/{session_id}")
+def finish_session(session_id: str, payload: SessionFinishRequest, request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    get_store().finish_session(
+        user["sub"],
+        session_id,
+        reps_done=payload.reps_done,
+        avg_score=payload.avg_score,
+        completed=payload.completed,
+        topic=payload.topic,
+    )
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/reps")
+def add_rep(session_id: str, payload: RepRequest, request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    get_store().add_rep(
+        user["sub"],
+        session_id,
+        rep_id=payload.id,
+        drill_id=payload.drill_id,
+        topic=payload.topic,
+        mode=payload.mode,
+        score=payload.score,
+        timed_out=payload.timed_out,
+        poi=payload.poi,
+        poi_chars=len(payload.poi or ""),
+        latency_ms=payload.latency_ms,
+        prompt_tokens=payload.prompt_tokens,
+        completion_tokens=payload.completion_tokens,
+        model=payload.model,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/sessions")
+def list_sessions(request: Request, limit: int = 20) -> dict[str, Any]:
+    user = require_user(request)
+    rows = get_store().list_sessions(user["sub"], limit)
+    return {"sessions": [_session_json(row) for row in rows]}
+
+
+@app.post("/api/sessions/import")
+def import_sessions(payload: HistoryImport, request: Request) -> dict[str, Any]:
+    """One-time import of the history a delegate built in localStorage."""
+    user = require_user(request)
+    store = get_store()
+    store.upsert_delegate(user)
+    imported = store.import_sessions(user["sub"], [entry.model_dump() for entry in payload.entries])
+    logger.info("Imported %s local sessions", imported)
+    return {"imported": imported}
+
+
+@app.get("/api/profile")
+def get_profile(request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    store = get_store()
+    delegate = store.get_delegate(user["sub"]) or store.upsert_delegate(user)
+    profile = store.profile(user["sub"]) or delegate
+    return _profile_json(profile)
+
+
+@app.patch("/api/profile")
+def update_profile(payload: StorageModeRequest, request: Request) -> dict[str, Any]:
+    """Retire the answer-storage switch. `off`/`redacted` mean the same to a
+    delegate; the deployment's own mode is set by the admin endpoint below."""
+    user = require_user(request)
+    store = get_store()
+    store.upsert_delegate(user)
+    store.set_store_answers(user["sub"], payload.mode == "full")
+    return {"ok": True, "store_answers": payload.mode == "full"}
+
+
+@app.post("/api/activity")
+def activity(payload: ActivityRequest, request: Request) -> dict[str, Any]:
+    """One visible minute on the app. The client sends this from a timer that is
+    paused while the tab is hidden, so idle time never counts as practice."""
+    user = require_user(request)
+    get_store().add_tick(user["sub"], payload.session_id)
+    return {"ok": True}
+
+
+@app.post("/api/events")
+def ingest_events(payload: EventBatch, request: Request) -> dict[str, Any]:
+    """Batched product events. Guests are allowed; a signed-in send is attributed."""
+    user = optional_user(request)
+    get_store().add_events(
+        user["sub"] if user else None,
+        [event.model_dump() for event in payload.events],
+        hashed_client(request),
+    )
+    return {"ok": True}
+
+
+@app.get("/api/settings")
+def read_settings() -> dict[str, Any]:
+    """The switches the UI needs to know about (no secrets in here)."""
+    return {"poi_storage_mode": get_store().storage_mode()}
+
+
+@app.patch("/api/admin/settings")
+def write_settings(payload: StorageModeRequest, request: Request) -> dict[str, Any]:
+    """Admin only: change the deployment-wide answer-storage policy."""
+    require_admin(request)
+    if payload.mode not in STORAGE_MODES:
+        raise HTTPException(status_code=422, detail="Unknown storage mode.")
+    get_store().set_storage_mode(payload.mode)
+    logger.info("Answer storage mode set to %s", payload.mode)
+    return {"ok": True, "poi_storage_mode": payload.mode}
 
 
 # --------------------------------------------------------------------------- #
@@ -620,6 +896,8 @@ def grade_poi(payload: POIRequest, request: Request) -> dict[str, Any]:
     if not speech or not poi:
         raise HTTPException(status_code=422, detail="Speech and POI must not be empty.")
 
+    started = time.monotonic()
+
     user_content = (
         f"<speech>\n{speech}\n</speech>\n\n"
         f"<poi>\n{poi}\n</poi>\n\n"
@@ -708,5 +986,14 @@ def grade_poi(payload: POIRequest, request: Request) -> dict[str, Any]:
         )
 
     grade = _normalize_grade(grade)
+    # The client needs the cost trail to store with the rep, and the latency is
+    # the only way to notice the chair getting slower before users complain.
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    grade["usage"] = {
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "model": body["model"],
+    }
+    grade["latency_ms"] = int((time.monotonic() - started) * 1000)
     logger.info("Graded a POI (score=%s)", grade.get("score"))
     return grade

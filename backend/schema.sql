@@ -1,0 +1,118 @@
+-- WriteItOut — Postgres schema
+--
+-- Apply with:  psql "$DATABASE_URL" -f schema.sql
+-- The store also applies it on first use when DATABASE_AUTO_MIGRATE=1 (default).
+--
+-- Rules of the house:
+--   * user_sub is Google's stable account id; it is the only identity key.
+--   * Answer text (poi) is null unless the deployment's storage mode is `full`
+--     AND the delegate has not opted out. Everything else is aggregate-safe.
+--   * Nothing here stores IPs; analytics keeps a salted hash only.
+
+create table if not exists delegates (
+  user_sub             text primary key,
+  email                text,
+  display_name         text,
+  picture_url          text,
+  -- The delegate's own "save my answers" switch. The server enforces it: a rep is
+  -- persisted with poi = null when this is false, whatever the client sends.
+  store_answers        boolean not null default true,
+  created_at           timestamptz not null default now(),
+  last_seen_at         timestamptz not null default now(),
+  total_reps           integer not null default 0,
+  score_sum            numeric not null default 0,
+  best_score           numeric(3,1),
+  streak_days          integer not null default 0,
+  longest_streak       integer not null default 0,
+  last_practice_on     date,
+  total_active_seconds bigint not null default 0
+);
+
+-- One Play press → Exit / completion. Time spent lives here and in activity_ticks.
+create table if not exists practice_sessions (
+  id              uuid primary key,
+  user_sub        text not null references delegates(user_sub) on delete cascade,
+  started_at      timestamptz not null default now(),
+  ended_at        timestamptz,
+  reps_target     integer not null,
+  reps_done       integer not null default 0,
+  seconds_per_rep integer not null default 0,
+  active_seconds  integer not null default 0,
+  avg_score       numeric(3,1),
+  completed       boolean not null default false
+);
+
+-- One graded POI. The id comes from the client so a retried request cannot
+-- double-count a rep.
+create table if not exists reps (
+  id                uuid primary key,
+  session_id        uuid not null references practice_sessions(id) on delete cascade,
+  user_sub          text not null references delegates(user_sub) on delete cascade,
+  drill_id          text not null,
+  topic             text,
+  mode              text not null check (mode in ('full', 'single')),
+  score             numeric(3,1) not null,
+  timed_out         boolean not null default false,
+  poi               text,
+  poi_chars         integer not null default 0,
+  latency_ms        integer,
+  prompt_tokens     integer,
+  completion_tokens integer,
+  model             text,
+  created_at        timestamptz not null default now()
+);
+
+-- Product analytics. Written by the batched ingest endpoint; rolled up nightly.
+create table if not exists events (
+  id          bigserial primary key,
+  user_sub    text,
+  name        text not null,
+  props       jsonb not null default '{}'::jsonb,
+  ip_hash     text,
+  created_at  timestamptz not null default now()
+);
+
+-- One tick per visible minute. This is how "time on the app" survives a tab left
+-- open overnight: gaps longer than the heartbeat are simply not counted.
+create table if not exists activity_ticks (
+  id          bigserial primary key,
+  user_sub    text not null,
+  session_id  uuid,
+  created_at  timestamptz not null default now()
+);
+
+-- Admin-controlled switches (answer storage mode, feature flags), edited from
+-- /admin so a policy change does not need a redeploy.
+create table if not exists app_settings (
+  key         text primary key,
+  value       jsonb not null,
+  updated_at  timestamptz not null default now()
+);
+
+-- Nightly rollup the dashboard reads instead of scanning the tables above.
+create table if not exists daily_metrics (
+  day                 date primary key,
+  users_active        integer not null default 0,
+  users_new           integer not null default 0,
+  sessions_started    integer not null default 0,
+  sessions_completed  integer not null default 0,
+  reps_graded         integer not null default 0,
+  avg_score           numeric(4,2),
+  timed_out_reps      integer not null default 0,
+  active_seconds      bigint not null default 0,
+  prompt_tokens       bigint not null default 0,
+  completion_tokens   bigint not null default 0,
+  cost_usd            numeric(10,4) not null default 0,
+  errors              integer not null default 0,
+  rate_limited        integer not null default 0,
+  updated_at          timestamptz not null default now()
+);
+
+create index if not exists reps_user_created_idx on reps (user_sub, created_at desc);
+create index if not exists reps_session_idx on reps (session_id);
+create index if not exists reps_created_idx on reps (created_at desc);
+create index if not exists sessions_user_started_idx on practice_sessions (user_sub, started_at desc);
+create index if not exists events_created_idx on events (created_at desc);
+create index if not exists events_name_created_idx on events (name, created_at desc);
+create index if not exists ticks_created_idx on activity_ticks (created_at desc);
+create index if not exists ticks_user_created_idx on activity_ticks (user_sub, created_at desc);

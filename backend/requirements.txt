@@ -6,3 +6,6 @@ python-dotenv>=1.0
 # Verifies Google ID tokens locally (POST /api/auth/google and /api/me). The
 # tokeninfo fallback in main.py covers a runtime without it.
 google-auth>=2.34
+# Postgres driver for the practice-data store. Without it a deployment that sets
+# DATABASE_URL still starts, but falls back to the in-memory store and forgets.
+psycopg[binary]>=3.2

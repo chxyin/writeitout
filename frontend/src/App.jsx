@@ -15,20 +15,23 @@ import PaperBackground from './components/PaperBackground.jsx';
 // shapes only (no embedded <style>/font like the logos carry), so a plain <img>
 // renders it exactly as drawn and the browser can cache the file.
 import appIcon from './assets/writeitout_icon.svg';
-import { saveSessionResult } from './lib/sessionHistory.js';
+import { HISTORY_STORAGE_KEY, loadSessionHistory, saveSessionResult } from './lib/sessionHistory.js';
 import useAuthSession, { authorizationHeaders } from './lib/auth.js';
+import { API_BASE_URL } from './lib/api.js';
+import {
+  finishPracticeSession,
+  importLocalHistory,
+  recordRep,
+  repId,
+  sendActivity,
+  startPracticeSession
+} from './lib/practice.js';
 import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
 import useBreakpoint from './hooks/useBreakpoint.js';
 import useViewportHeight from './hooks/useViewportHeight.js';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV
-    ? 'http://127.0.0.1:8000'
-    : 'https://writeitout-backend.vercel.app');
 
 function describeApiError(data, status) {
   const detail = data && data.detail;
@@ -188,7 +191,7 @@ export default function App() {
   // checks it again.
   const handleSignIn = useCallback(
     async (credential) => {
-      signIn(credential);
+      const next = signIn(credential);
       try {
         const response = await fetch(`${API_BASE_URL}/api/auth/google`, {
           method: 'POST',
@@ -202,6 +205,28 @@ export default function App() {
       } catch {
         // Network failure: keep the session rather than punishing the delegate
         // for a flaky connection to the chair API.
+      }
+
+      // One-time migration: the sessions this browser kept before the database
+      // existed (the guest bucket and this account's own) move into the account.
+      if (next && next.sub) {
+        const marker = `writeitout:imported:${next.sub}`;
+        let alreadyImported;
+        try {
+          alreadyImported = window.localStorage.getItem(marker) === '1';
+        } catch {
+          alreadyImported = true; // cannot read storage: never re-import blind
+        }
+        if (!alreadyImported) {
+          const local = [...loadSessionHistory(undefined), ...loadSessionHistory(next.sub)];
+          const imported = await importLocalHistory(local);
+          try {
+            window.localStorage.setItem(marker, '1');
+            if (imported > 0) window.localStorage.removeItem(HISTORY_STORAGE_KEY);
+          } catch {
+            // The marker is best-effort; the database still deduped by session id.
+          }
+        }
       }
       return true;
     },
@@ -227,6 +252,9 @@ export default function App() {
   const { topOffset, bottomOffset, textSize, cardWidth } = settings;
   const closeMenu = useCallback(() => setShowMenu(false), []);
   const exitTimer = useRef(null);
+  // The database row for the session on screen. Null while signed out, or until
+  // the start call answers; every write is a no-op without it.
+  const sessionIdRef = useRef(null);
   // When the rep on screen runs out, as an absolute epoch millisecond. The clock
   // reads this rather than counting its own ticks: a backgrounded tab throttles
   // timers to one a minute (and iOS suspends them), which used to hand back
@@ -298,6 +326,7 @@ export default function App() {
     if (!response.ok) throw new Error(`Speech request failed (${response.status})`);
     const data = await response.json();
     return {
+      id: data.id,
       committee: data.committee,
       delegate: data.country,
       topic: data.topic,
@@ -527,6 +556,25 @@ export default function App() {
             : entry
         )
       );
+
+      // Persist the rep while the cost trail is still in hand. Fire-and-forget:
+      // the delegate has their feedback whether or not the write lands.
+      if (session) {
+        recordRep(sessionIdRef.current, {
+          id: repId(),
+          drill_id: String(currentDrill.id || currentDrill.topic || 'unknown'),
+          topic: currentDrill.topic || null,
+          mode: mode === 'single' ? 'single' : 'full',
+          score: data.score,
+          timed_out: clockExpired,
+          poi,
+          latency_ms: data.latency_ms ?? null,
+          prompt_tokens: data.usage?.prompt_tokens ?? null,
+          completion_tokens: data.usage?.completion_tokens ?? null,
+          model: data.usage?.model ?? null
+        });
+      }
+
       setFormExiting(true);
       if (exitTimer.current) clearTimeout(exitTimer.current);
       exitTimer.current = setTimeout(() => {
@@ -544,7 +592,7 @@ export default function App() {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [clockExpired, currentDrill, currentIndex, loading, mode, poi, signOut]);
+  }, [clockExpired, currentDrill, currentIndex, loading, mode, poi, session, signOut]);
 
   const handleSubmit = () => submitPoi();
 
@@ -579,16 +627,27 @@ export default function App() {
     if (graded.length) {
       const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
       const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+      const average = Math.round((total / graded.length) * 10) / 10;
+      const label = topics.length === 1 ? topics[0] : `${topics.length} topics`;
       saveSessionResult(
         {
-          topic: topics.length === 1 ? topics[0] : `${topics.length} topics`,
+          topic: label,
           // One decimal: the list shows "7.4/10", and a whole average stays "8".
-          score: Math.round((total / graded.length) * 10) / 10
+          score: average
         },
         // Signed-in delegates keep a bucket per account; a guest uses the shared one.
         session?.sub
       );
+      if (session) {
+        finishPracticeSession(sessionIdRef.current, {
+          repsDone: graded.length,
+          avgScore: average,
+          completed: true,
+          topic: label
+        });
+      }
     }
+    sessionIdRef.current = null;
     setSessionComplete(true);
   };
 
@@ -631,15 +690,47 @@ export default function App() {
     setFormExiting(false);
     setSubmitError('');
     loadFirstRep();
+    // A new run out of the completion screen is a new row too.
+    sessionIdRef.current = null;
+    if (session && gameSettings) {
+      startPracticeSession(gameSettings).then((id) => {
+        sessionIdRef.current = id;
+      });
+    }
+  };
+
+  // Play: remember the numbers, open the drill, and create the server-side row
+  // the reps will hang from. The row can arrive a moment later — a rep graded
+  // before it does is dropped rather than written against the wrong session.
+  const handleStart = (next) => {
+    setGameSettings(next);
+    persistLastSession(next);
+    setCurrentView('game');
+    sessionIdRef.current = null;
+    if (session) {
+      startPracticeSession(next).then((id) => {
+        sessionIdRef.current = id;
+      });
+    }
   };
 
   // "Exit Task" abandons the session and goes back to the splash screen. Nothing
-  // is written to Recent Sessions — only a finished session saves a score — but
-  // every bit of game state is dropped, so the next Play fetches a fresh speech
-  // and starts its own progress bar. Clearing the history is also what stops the
-  // rep timer: the countdown effect only runs while a drill is on screen.
+  // is added to Recent Sessions — only a finished session saves a score — but the
+  // server row is closed out as incomplete, so the abandoned time is still
+  // counted and the session does not look like it is still running.
   const handleExitTask = () => {
     if (exitTimer.current) clearTimeout(exitTimer.current);
+    if (session) {
+      const graded = history.filter((entry) => entry.feedback);
+      const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+      finishPracticeSession(sessionIdRef.current, {
+        repsDone: graded.length,
+        avgScore: graded.length ? Math.round((total / graded.length) * 10) / 10 : null,
+        completed: false,
+        topic: graded.length ? graded[0].drill.topic : null
+      });
+    }
+    sessionIdRef.current = null;
     setCurrentView('splash');
     setHistory([]);
     setCurrentIndex(0);
@@ -658,6 +749,18 @@ export default function App() {
     // the next Play, over a screen the delegate had already dismissed.
     setShowMenu(false);
   };
+
+  // One heartbeat per visible minute while a session is open. The interval is
+  // paused by the browser in a background tab, and the visibility check covers
+  // the first tick after returning, so idle time is never counted as practice.
+  useEffect(() => {
+    if (currentView !== 'game' || !session) return undefined;
+    const beat = () => {
+      if (document.visibilityState === 'visible') sendActivity(sessionIdRef.current);
+    };
+    const timer = setInterval(beat, 60_000);
+    return () => clearInterval(timer);
+  }, [currentView, session]);
 
   const handlePoiChange = (value) => {
     setPoi(value);
@@ -682,11 +785,7 @@ export default function App() {
         onSignIn={handleSignIn}
         onSignOut={signOut}
         initialSettings={gameSettings}
-        onStart={(next) => {
-          setGameSettings(next);
-          persistLastSession(next);
-          setCurrentView('game');
-        }}
+        onStart={handleStart}
       />
     );
   }
