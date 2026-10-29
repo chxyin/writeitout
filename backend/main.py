@@ -596,10 +596,15 @@ def _normalize_grade(grade: dict[str, Any]) -> dict[str, Any]:
 # Endpoints
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
-def health() -> dict[str, Any]:
-    """Cheap liveness probe that never calls DeepSeek."""
+def health(verbose: bool = False) -> dict[str, Any]:
+    """Cheap liveness probe that never calls DeepSeek.
+
+    `?verbose=1` adds the reason the database cannot be reached. It is off by
+    default so the public probe stays a plain status, and the message never
+    contains credentials.
+    """
     store = get_store()
-    return {
+    body: dict[str, Any] = {
         "status": "ok",
         "dataset_loaded": _speeches is not None,
         "store": store.backend,
@@ -608,6 +613,9 @@ def health() -> dict[str, Any]:
         "store_source": store_source(),
         "database_ok": store.ping(),
     }
+    if verbose:
+        body["database_error"] = store.ping_error()
+    return body
 
 
 # --------------------------------------------------------------------------- #

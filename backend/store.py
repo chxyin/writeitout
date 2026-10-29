@@ -132,6 +132,9 @@ class Store:
         """True when the backing store actually answers."""
         return True
 
+    def ping_error(self) -> str | None:
+        return None
+
     # -- helpers ------------------------------------------------------------ #
     def should_store_answers(self, sub: str) -> bool:
         if self.storage_mode() != "full":
@@ -383,7 +386,14 @@ class PostgresStore(Store):
 
     @contextmanager
     def _conn(self):
-        with self._psycopg.connect(self.dsn, connect_timeout=10, row_factory=self._dict_row) as conn:
+        # prepare_threshold=None disables server-side prepared statements, which a
+        # transaction-mode pooler (Supabase's port 6543) cannot reuse.
+        with self._psycopg.connect(
+            self.dsn,
+            connect_timeout=10,
+            row_factory=self._dict_row,
+            prepare_threshold=None,
+        ) as conn:
             yield conn
 
     def ensure_schema(self) -> None:
@@ -644,14 +654,25 @@ class PostgresStore(Store):
     def ping(self) -> bool:
         """A short, timeout-bounded probe: health must answer even when the DB is
         unreachable."""
+        return self.ping_error() is None
+
+    def ping_error(self) -> str | None:
+        """Why the store cannot be reached, or None. Credentials are stripped."""
         try:
             with self._psycopg.connect(
-                self.dsn, connect_timeout=3, row_factory=self._dict_row
+                self.dsn,
+                connect_timeout=5,
+                row_factory=self._dict_row,
+                prepare_threshold=None,
             ) as conn:
                 conn.execute("select 1")
-            return True
-        except Exception:  # noqa: BLE001 - any failure means "not healthy"
-            return False
+            return None
+        except Exception as error:  # noqa: BLE001 - any failure means "not healthy"
+            import re
+
+            message = f"{type(error).__name__}: {error}"
+            # A libpq error can echo the whole URL; never let the password out.
+            return re.sub(r"://[^@\s]*@", "://***@", message)[:200]
 
 
 _store: Store | None = None
@@ -668,15 +689,18 @@ DSN_ENV_NAMES = (
     "SUPABASE_DB_URL",
 )
 
-# libpq rejects connection options it does not know, and the URLs the Supabase
-# integration hands out carry Prisma's `pgbouncer=true` and friends.
-PRISMA_ONLY_PARAMS = {
-    "pgbouncer",
-    "connection_limit",
-    "pool_timeout",
-    "schema",
-    "statement_cache_size",
-    "sslmode_require",
+# libpq rejects connection options it does not know. Supabase hands out URLs with
+# Prisma's `pgbouncer=true` and its own `supa=base-pooler.x`; both have to go, and
+# only libpq's own options are kept.
+LIBPQ_PARAMS = {
+    "sslmode",
+    "connect_timeout",
+    "application_name",
+    "target_session_attrs",
+    "channel_binding",
+    "options",
+    "keepalives",
+    "keepalives_idle",
 }
 
 # Which variable the live store was built from, exposed on /api/health so a
@@ -685,11 +709,14 @@ DSN_SOURCE: str | None = None
 
 
 def sanitize_dsn(dsn: str) -> str:
-    """Make a Supabase/Vercel URL acceptable to libpq."""
+    """Make a Supabase/Vercel URL acceptable to libpq.
+
+    Keeps only libpq's own parameters, and insists on TLS for a Supabase host.
+    """
     from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
     parts = urlsplit(dsn.strip())
-    query = [(key, value) for key, value in parse_qsl(parts.query) if key not in PRISMA_ONLY_PARAMS]
+    query = [(key, value) for key, value in parse_qsl(parts.query) if key in LIBPQ_PARAMS]
     if parts.hostname and "supabase" in parts.hostname:
         if not any(key == "sslmode" for key, _ in query):
             query.append(("sslmode", "require"))
