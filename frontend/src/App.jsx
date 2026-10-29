@@ -449,6 +449,26 @@ export default function App() {
     loadFirstRep();
   };
 
+  // "Exit Task" abandons the session and goes back to the splash screen. Nothing
+  // is written to Recent Sessions — only a finished session saves a score — but
+  // every bit of game state is dropped, so the next Play fetches a fresh speech
+  // and starts its own progress bar. Clearing the history is also what stops the
+  // rep timer: the countdown effect only runs while a drill is on screen.
+  const handleExitTask = () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    setCurrentView('splash');
+    setHistory([]);
+    setCurrentIndex(0);
+    setPoi('');
+    setShowFeedback(false);
+    setSessionComplete(false);
+    setFormExiting(false);
+    setSubmitError('');
+    setDrillError('');
+    setLoadingDrill(true);
+    setTimeLeft(0);
+  };
+
   const handlePoiChange = (value) => {
     setPoi(value);
     if (submitError) setSubmitError('');
@@ -550,12 +570,24 @@ export default function App() {
               </span>
             )}
           </div>
-          <div className="toggle-container stagger-in stagger-2">
-            <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
-            <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
-              <div className="toggle-knob"></div>
+          <div className="mode-row stagger-in stagger-2">
+            {/* The way out of a drill. Sits at the leading edge of the mode row,
+                so the Full Speech / Solutions Only switch stays centred. */}
+            <button
+              type="button"
+              className="exit-task-btn"
+              onClick={handleExitTask}
+              title="Leave this task and go back to the start screen"
+            >
+              Exit Task
+            </button>
+            <div className="toggle-container">
+              <span style={{ opacity: mode === 'full' ? 1 : 0.5 }}>Full Speech</span>
+              <div className={`toggle-switch ${mode === 'full' ? 'active' : ''}`} onClick={() => setMode(mode === 'full' ? 'single' : 'full')}>
+                <div className="toggle-knob"></div>
+              </div>
+              <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
             </div>
-            <span style={{ opacity: mode === 'single' ? 1 : 0.5 }}>Solutions Only</span>
           </div>
         </div>
 

@@ -365,7 +365,33 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
 .rep-timer.is-done { background: rgba(255, 59, 48, 0.28); border-color: rgba(255, 59, 48, 0.6); color: #FFD9D6; }
 
 .toggle-container { display: flex; justify-content: center; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; }
-.toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border-radius: 20px; cursor: pointer; transition: 0.3s; }
+
+/* The mode row is the toggle's own centred box with the exit action pinned to
+   its leading edge, so adding the button does not shift the switch off the
+   shell's centre line. */
+.mode-row { position: relative; display: flex; align-items: center; justify-content: center; }
+.exit-task-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.14);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+}
+.exit-task-btn:hover { background: rgba(255, 255, 255, 0.24); border-color: rgba(255, 255, 255, 0.4); }
+.exit-task-btn:active { transform: translateY(-50%) scale(0.96); }
+.exit-task-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.toggle-switch { position: relative; width: 50px; height: 28px; background: rgba(255, 255, 255, 0.2); border-radius: 20px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
 .toggle-switch.active { background: var(--accent-orange); }
 .toggle-knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
 .toggle-switch.active .toggle-knob { transform: translateX(22px); }
@@ -718,6 +744,7 @@ textarea:focus {
 /* ---- Band 1: progress + mode toggle. Pinned, never scrolls. ---- */
 .app-container[data-tier="desktop"] > .app-top { flex: 0 0 auto; }
 .app-container[data-tier="desktop"] .progress-bar,
+.app-container[data-tier="desktop"] .mode-row,
 .app-container[data-tier="desktop"] .toggle-container {
   /* Chrome of the shell never shrinks. */
   flex-shrink: 0;
@@ -919,9 +946,16 @@ body[data-tier="mobile"] {
 }
 /* Chrome of the shell: progress and the mode toggle never shrink. */
 .app-container[data-tier="mobile"] .progress-bar,
+.app-container[data-tier="mobile"] .mode-row,
 .app-container[data-tier="mobile"] .toggle-container {
   flex-shrink: 0;
 }
+/* A phone is too narrow for an overlaid Exit Task: the button joins the flow at
+   the leading edge and the switch keeps the right, with no overlap either way. */
+.app-container[data-tier="mobile"] .mode-row { justify-content: space-between; gap: 10px; }
+.app-container[data-tier="mobile"] .mode-row .toggle-container { justify-content: flex-end; flex: 1 1 auto; gap: 10px; font-size: 13px; }
+.app-container[data-tier="mobile"] .exit-task-btn { position: static; transform: none; padding: 5px 10px; font-size: 11px; }
+.app-container[data-tier="mobile"] .exit-task-btn:active { transform: scale(0.96); }
 .app-container[data-tier="mobile"] .drill-form {
   flex: 1 1 auto;
   min-height: 0;
@@ -1150,25 +1184,30 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .card-title { font-size: 1.4rem; font-weight: 900; text-align: center; margin-bottom: 0.5rem; }
 
 /* ---------- Settings card ---------- */
-/* Reps carries six segments now, and the timer five, so the row is allowed to
-   wrap: on a narrow card the control drops under its label instead of
-   overflowing, and the control itself wraps rather than pushing out through the
-   card's padding. */
-.splash-screen .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.splash-screen .setting-label { font-size: 0.9rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+/* Reps carries six segments and the timer five, so neither picker may take its
+   width from its own labels: that is what left the two bars different lengths.
+   The row gives the label a fixed column and hands the rest to the control, so
+   both bars are the same length on the card whatever they hold. */
+.splash-screen .setting-row { display: flex; align-items: center; gap: 1rem; }
+.splash-screen .setting-label { flex: 0 0 3.75rem; font-size: 0.9rem; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 
-/* The picker plus the box a Custom segment reveals, kept on one line and pushed
-   to the right edge the way the bare picker used to be. */
+/* The picker plus the box a Custom segment reveals. The box sits under the bar
+   rather than beside it, so revealing it never shortens the bar of its row. */
 .splash-screen .setting-control {
-  display: flex; align-items: center; justify-content: flex-end;
-  gap: 0.5rem; flex-wrap: wrap; margin-left: auto;
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 0.5rem; flex: 1 1 0; min-width: 0;
 }
 
 .splash-screen .segmented-control {
-  display: flex; flex-wrap: wrap;
+  display: flex; flex-wrap: wrap; width: 100%;
   background: rgba(0, 0, 0, 0.4); border-radius: 10px; padding: 3px; gap: 3px;
 }
+/* flex-basis: auto keeps each label's own width as the floor and the growth
+   share fills the bar evenly: "Custom" is never clipped, and the bar still lands
+   on the same width on both rows. The picker's wrap is the fallback for a card
+   too narrow to hold five segments on one line. */
 .splash-screen .seg-btn {
+  flex: 1 1 auto; white-space: nowrap;
   background: transparent; border: none; border-radius: 8px; padding: 0.4rem 0.7rem;
   font-family: inherit; font-size: 0.8rem; font-weight: 800;
   color: rgba(255, 255, 255, 0.5); cursor: pointer; transition: all 0.2s;
@@ -1177,9 +1216,12 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .splash-screen .seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 
 /* The number box a Custom segment swaps in: the same dark slab as the picker
-   beside it, so the row keeps one visual weight. The native spinner is left
-   alone — it is the only affordance that says "type a number here" on desktop. */
+   above it, so the row keeps one visual weight. Right-aligned under the bar and
+   below it in the column, so the picker keeps its full length. The native
+   spinner is left alone — it is the only affordance that says "type a number
+   here" on desktop. */
 .splash-screen .seg-input {
+  align-self: flex-end;
   width: 5rem;
   padding: 0.4rem 0.5rem;
   background: rgba(0, 0, 0, 0.4);
@@ -1333,9 +1375,11 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .splash-screen.is-logged-in .right-panel { order: 2; width: 100%; max-width: 480px; justify-content: center; }
   .splash-screen.is-logged-in .auth-card { order: 3; width: 100%; max-width: 480px; }
 
-  /* Six rep segments (and five timer ones) on a phone-width card: tighten them a
-     notch so the row stays on one line, and let the card's own padding be the
-     outer margin. */
+  /* Six rep segments (and five timer ones) on a phone-width card: the label
+     moves above its picker so the bar can use the card's whole width, and the
+     segments tighten a notch so the row stays on one line. */
+  .splash-screen .setting-row { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+  .splash-screen .setting-label { flex: 0 0 auto; }
   .splash-screen .seg-btn { padding: 0.35rem 0.55rem; font-size: 0.75rem; }
   .splash-screen .seg-input { width: 4.5rem; }
 }

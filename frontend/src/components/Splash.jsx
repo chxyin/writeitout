@@ -13,9 +13,10 @@ import logoMarkup from '../assets/writeitout.svg?raw';
 
 // Splash screen values. Reps is the session length and the timer is the per-rep
 // countdown in seconds, 0 meaning off — a session starts with no clock, and the
-// game draws no countdown chip, until a timer segment is picked. Both pickers end
-// in a "Custom" segment that swaps in a number box; what Play hands over is always
-// the number, never the segment's label.
+// game draws no countdown chip, until a timer segment is picked. The timer's
+// "N/A" segment is that off switch, so it is first, before the timed choices.
+// Both pickers end in a "Custom" segment that swaps in a number box; what Play
+// hands over is always the number, never the segment's label.
 const CUSTOM = 'custom';
 
 const REPS_OPTIONS = [
@@ -27,11 +28,13 @@ const REPS_OPTIONS = [
   { value: CUSTOM, label: 'Custom' }
 ];
 
+// N/A is 0 — the same "no clock" value a timed session runs down to — so the
+// segment is a real choice rather than a placeholder, and the picker opens on it.
 const TIMER_OPTIONS = [
+  { value: 0, label: 'N/A' },
   { value: 15, label: '15s' },
   { value: 30, label: '30s' },
   { value: 45, label: '45s' },
-  { value: 60, label: '60s' },
   { value: CUSTOM, label: 'Custom' }
 ];
 
