@@ -181,6 +181,33 @@ export default function App() {
   // is keyed by the account id.
   const { session, signIn, signOut } = useAuthSession();
 
+  // Verify the credential with the API as soon as Google hands it over. A token
+  // can be well formed and still be rejected — expired, revoked, or minted for
+  // another client ID — and finding that out at the sign-in is much better than
+  // at the first submit. Offline, the local session stands and the first grade
+  // checks it again.
+  const handleSignIn = useCallback(
+    async (credential) => {
+      signIn(credential);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential })
+        });
+        if (response.status === 401 || response.status === 403) {
+          signOut();
+          return false;
+        }
+      } catch {
+        // Network failure: keep the session rather than punishing the delegate
+        // for a flaky connection to the chair API.
+      }
+      return true;
+    },
+    [signIn, signOut]
+  );
+
   // Session length is the single source of truth for the progress bar, the
   // next-rep check and the completion screen. It comes from the splash screen's
   // Reps picker now; ∞ arrives as Infinity, which is exactly "there is no last
@@ -652,7 +679,7 @@ export default function App() {
         animOn={animOn}
         lowIntensity={lowIntensity}
         session={session}
-        onSignIn={signIn}
+        onSignIn={handleSignIn}
         onSignOut={signOut}
         initialSettings={gameSettings}
         onStart={(next) => {

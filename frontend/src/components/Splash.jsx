@@ -179,9 +179,12 @@ export default function Splash({
   // hands the result back for the card. The sign-in counts either way: if the
   // token cannot be read the card shows its fallback avatar and "Delegate"
   // instead of pretending the delegate is signed out.
-  const handleLoginSuccess = ({ credential }) => {
+  const handleLoginSuccess = async ({ credential }) => {
     setAuthError('');
-    onSignIn(credential);
+    const accepted = await onSignIn(credential);
+    if (accepted === false) {
+      setAuthError('Google signed you in, but this app rejected the credential. Please try again.');
+    }
   };
 
   const handleLoginError = () => {
