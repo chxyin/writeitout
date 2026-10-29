@@ -422,18 +422,21 @@ class PostgresStore(Store):
             if self._migrated:
                 return
             sql = SCHEMA_FILE.read_text(encoding="utf-8")
+            # Strip whole-line comments BEFORE splitting on ";". The schema's
+            # header is prose that contains semicolons ("... account id; it is the
+            # only identity key."), and splitting first cut that comment in half and
+            # executed its tail.
+            body = "\n".join(
+                line for line in sql.splitlines() if not line.strip().startswith("--")
+            )
             with self._raw_conn() as conn:
-                # The schema is plain DDL, so splitting on the statement terminator
-                # is enough; psycopg refuses multiple statements in one execute.
-                for statement in (part.strip() for part in sql.split(";")):
-                    if statement and not statement.startswith("--"):
+                # psycopg refuses multiple statements per execute, and the schema is
+                # plain DDL, so splitting on the terminator is safe once the prose is
+                # gone.
+                for statement in body.split(";"):
+                    statement = statement.strip()
+                    if statement:
                         conn.execute(statement)
-                    elif statement:
-                        body = "\n".join(
-                            line for line in statement.splitlines() if not line.strip().startswith("--")
-                        ).strip()
-                        if body:
-                            conn.execute(body)
             self._migrated = True
 
     def upsert_delegate(self, claims: dict[str, Any]) -> dict[str, Any]:
