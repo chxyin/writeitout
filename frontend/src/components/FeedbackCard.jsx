@@ -38,7 +38,10 @@ export default function FeedbackCard({
   historyLength = 1,
   // Reps reached through < Prev are being reviewed, so the original answer is
   // expanded by default (the toggle still collapses it again).
-  initialShowOriginal = false
+  initialShowOriginal = false,
+  // The clock ran out and the POI went in as it stood. The card says so, because
+  // a short answer would otherwise look like the delegate simply stopped.
+  timedOut = false
 }) {
   const [copied, setCopied] = useState(false);
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal);
@@ -69,6 +72,9 @@ export default function FeedbackCard({
       <div className="feedback-body">
         <div className="feedback-score" style={{ color: scoreColor }}>{feedback.score}/10</div>
         <div className="feedback-label">{feedback.grade_label}</div>
+        {timedOut && (
+          <div className="feedback-timeout">Clock ran out — this went in as it stood.</div>
+        )}
 
         <p><strong>Reasoning:</strong> {feedback.reasoning}</p>
         <p><strong>Advice:</strong> {feedback.constructive_feedback}</p>

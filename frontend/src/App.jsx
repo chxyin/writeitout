@@ -154,6 +154,11 @@ export default function App() {
   // the --fmt-* custom properties below.
   const { topOffset, bottomOffset, textSize, cardWidth } = settings;
   const exitTimer = useRef(null);
+  // True once this rep's clock has auto-submitted it. Cleared by everything that
+  // puts a rep (or a fresh clock) on screen, so a rep can be sent by the timer
+  // only once per countdown — and the graded entry that comes back can never
+  // re-trigger the submit that produced it.
+  const autoSubmittedRef = useRef(false);
 
   const updateSetting = useCallback((key, value) => {
     setSettings((previous) => ({ ...previous, [key]: value }));
@@ -184,6 +189,11 @@ export default function App() {
     0
   );
 
+  // The rep's clock has run out. Every load path resets timeLeft to repSeconds,
+  // so a zero here can only mean a timed rep really expired — never the off
+  // setting, which has no clock and never reaches this branch.
+  const clockExpired = repSeconds > 0 && timeLeft === 0 && Boolean(currentDrill);
+
   const activePrompt = currentDrill
     ? mode === 'single' ? currentDrill.single_claim : currentDrill.full_speech
     : '';
@@ -212,6 +222,7 @@ export default function App() {
       setCurrentIndex(0);
       setPoi('');
       // First rep of a session: the splash screen's Timer value starts over.
+      autoSubmittedRef.current = false;
       setTimeLeft(repSeconds);
     } catch (error) {
       setDrillError(error.message);
@@ -231,9 +242,10 @@ export default function App() {
 
   // Rep timer, part 1 of 1: tick while a POI can still be written. The clock is
   // reset by whatever puts a rep on screen (loadFirstRep / startNewRep /
-  // goToEntry) rather than by an effect, so the chip never renders a stale value
-  // for a frame. Feedback and the completion screen pause it, and at zero it
-  // stays at zero rather than submitting on the user's behalf.
+  // goToEntry / back to edit) rather than by an effect, so the chip never renders
+  // a stale value for a frame. Feedback and the completion screen pause it. At
+  // zero the clock stops on its own — the auto-submit below is a separate effect,
+  // because this one only owns the countdown.
   useEffect(() => {
     if (!repSeconds || showFeedback || sessionComplete || !currentDrill) return undefined;
     const tick = setInterval(() => {
@@ -254,7 +266,9 @@ export default function App() {
     setSubmitError('');
     setDrillError('');
     setFormExiting(false);
-    // Same rule as a fresh rep: the countdown belongs to the rep on screen.
+    // Same rule as a fresh rep: the countdown belongs to the rep on screen, and
+    // its one automatic submit is available again.
+    autoSubmittedRef.current = false;
     setTimeLeft(repSeconds);
     if (exitTimer.current) clearTimeout(exitTimer.current);
   }, [history, repSeconds]);
@@ -330,6 +344,7 @@ export default function App() {
         setCurrentIndex(history.length);
       }
       setPoi('');
+      autoSubmittedRef.current = false;
       setTimeLeft(repSeconds);
     } catch (error) {
       setDrillError(error.message);
@@ -347,7 +362,11 @@ export default function App() {
   const hasUnsavedDraft = !feedback && poi.trim().length > 0;
   const canNext = !loading && !loadingDrill && !(atEndOfHistory && hasUnsavedDraft);
 
-  const handleSubmit = async () => {
+  // One place for the grading request, so the Submit button and the clock send
+  // exactly the same payload. `timed_out` is what tells the chair the answer may
+  // stop mid-sentence: it is true whenever the rep's clock has run out, which
+  // also covers a manual retry after a failed auto-submit.
+  const submitPoi = useCallback(async () => {
     if (!currentDrill || !poi || loading) return;
     setLoading(true);
     setSubmitError('');
@@ -358,7 +377,8 @@ export default function App() {
         body: JSON.stringify({
           speech: currentDrill.full_speech,
           poi: poi,
-          is_solutions_only: mode === 'single'
+          is_solutions_only: mode === 'single',
+          timed_out: clockExpired
         })
       });
 
@@ -372,10 +392,13 @@ export default function App() {
 
       // The pending rep already occupies history[currentIndex] (it was seeded
       // when the drill arrived), so grading fills that slot instead of appending
-      // a duplicate — history never holds two versions of the same rep.
+      // a duplicate — history never holds two versions of the same rep. The
+      // timeout flag is kept with the entry so the card can say why it stopped.
       setHistory((entries) =>
         entries.map((entry, index) =>
-          index === currentIndex ? { drill: currentDrill, poi, feedback: data } : entry
+          index === currentIndex
+            ? { drill: currentDrill, poi, feedback: data, timedOut: clockExpired }
+            : entry
         )
       );
       setFormExiting(true);
@@ -389,7 +412,28 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clockExpired, currentDrill, currentIndex, loading, mode, poi]);
+
+  const handleSubmit = () => submitPoi();
+
+  // What the clock does at zero: send whatever stands in the box, flagged so the
+  // chair knows the answer was cut off rather than finished. It runs once per
+  // countdown — the graded entry that comes back would otherwise re-trigger the
+  // very submit that produced it — and it never fires on an empty box, which has
+  // nothing to grade and would be rejected anyway. A manual retry still carries
+  // the flag while the clock reads zero, so a failed auto-submit is not silently
+  // graded as a finished answer.
+  useEffect(() => {
+    if (!repSeconds || showFeedback || sessionComplete || !currentDrill) return;
+    if (!clockExpired || autoSubmittedRef.current) return;
+    autoSubmittedRef.current = true;
+    if (!poi.trim()) return;
+    // Queued rather than called here: the submit opens with a state update, and
+    // an effect body must not start one. The ref above still bounds it to a
+    // single call per countdown.
+    queueMicrotask(() => submitPoi());
+  }, [repSeconds, showFeedback, sessionComplete, currentDrill, clockExpired, poi, submitPoi]);
+
 
   /**
    * Closes out a finished session: records it for the splash screen's Recent
@@ -432,12 +476,16 @@ export default function App() {
   };
 
   // ← Back leaves the card for the drill of the same rep, POI included, so an
-  // answer can be re-read and re-graded in place.
+  // answer can be re-read and re-graded in place. The clock restarts with the
+  // rep, the same as goToEntry does — without that, a rep whose time ran out
+  // would come back already expired and instantly auto-submit itself again.
   const handleBackToEdit = () => {
     if (exitTimer.current) clearTimeout(exitTimer.current);
     setShowFeedback(false);
     setFormExiting(false);
     setSubmitError('');
+    autoSubmittedRef.current = false;
+    setTimeLeft(repSeconds);
   };
 
   const handleStartSession = () => {
@@ -466,6 +514,7 @@ export default function App() {
     setSubmitError('');
     setDrillError('');
     setLoadingDrill(true);
+    autoSubmittedRef.current = false;
     setTimeLeft(0);
   };
 
@@ -628,6 +677,7 @@ export default function App() {
             historyIndex={currentIndex}
             historyLength={history.length}
             initialShowOriginal={currentIndex < history.length - 1}
+            timedOut={Boolean(currentEntry?.timedOut)}
           />
         )}
       </div>

@@ -521,6 +521,9 @@ textarea:focus {
 }
 .feedback-score { font-size: 3rem; font-weight: 800; margin-bottom: 0.5rem; }
 .feedback-label { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1.5rem; }
+/* Only drawn when the rep's clock submitted the POI. Sits under the label with
+   the label's own margin pulled back, so the card reads the same either way. */
+.feedback-timeout { margin: -1rem 0 1.5rem; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.02em; color: #B26B00; }
 .feedback-card p { font-size: 1rem; line-height: 1.5; margin-bottom: 1rem; }
 .rewrite-box { background: #FFF4E5; border-left: 4px solid var(--accent-orange); padding: 1rem; border-radius: 0 8px 8px 0; margin-top: 1.5rem; }
 .rewrite-box span { color: var(--accent-orange); font-weight: 800; font-size: 0.8rem; text-transform: uppercase; display: block; margin-bottom: 0.5rem; }
