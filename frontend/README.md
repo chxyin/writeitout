@@ -56,6 +56,16 @@ npm run preview  # serve the built bundle
 npm run lint     # eslint
 ```
 
+### Why the build names old browsers
+
+`vite.config.js` sets `build.cssTarget` to Safari 14 / Chrome 87 and friends.
+Left at Vite 8's default, the CSS pipeline rewrites every breakpoint into the
+range form `@media (width <= 1024px)`, which only Safari 16.4+ and Chrome 104+
+understand — an older phone drops the block silently, so the home screen draws
+its desktop two-column layout on a 390px screen. Naming older browsers keeps
+`@media (max-width: 1024px)` in the output. Do not remove the setting without
+rebuilding and checking that the compiled stylesheet still says `max-width`.
+
 ## React + Vite notes
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
