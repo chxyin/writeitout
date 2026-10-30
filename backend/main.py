@@ -16,7 +16,12 @@ import threading
 import time
 import uuid
 from collections import deque
-from datetime import date, datetime, time, timedelta, timezone
+# `time` stays the module: SlidingWindowRateLimiter reads time.monotonic(). The
+# datetime class of the same name is imported under a name that cannot shadow it,
+# which is what broke every rate-limited endpoint (grading included) when the two
+# were both called `time`.
+from datetime import date, datetime, timedelta, timezone
+from datetime import time as clock_time
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -218,7 +223,7 @@ GUEST_LIMIT_COPY = (
 def _hk_day_start(now: datetime | None = None) -> datetime:
     """Midnight in Hong Kong, the moment the anonymous daily cap resets."""
     moment = now or datetime.now(HK)
-    return datetime.combine(moment.date(), time.min, tzinfo=HK)
+    return datetime.combine(moment.date(), clock_time.min, tzinfo=HK)
 
 
 def visitor_id(request: Request) -> str:
@@ -1407,8 +1412,8 @@ def _admin_window(days: int, start: str | None, end: str | None) -> tuple[dateti
         first = last - timedelta(days=max(1, min(365, days)) - 1)
 
     return (
-        datetime.combine(first, time.min, tzinfo=HK),
-        datetime.combine(last + timedelta(days=1), time.min, tzinfo=HK),
+        datetime.combine(first, clock_time.min, tzinfo=HK),
+        datetime.combine(last + timedelta(days=1), clock_time.min, tzinfo=HK),
     )
 
 
