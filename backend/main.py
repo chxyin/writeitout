@@ -453,7 +453,11 @@ class RepRequest(BaseModel):
     score: float = Field(ge=0, le=10)
     timed_out: bool = False
     poi: str = Field(default="", max_length=MAX_POI_CHARS)
+    # The grader's round-trip (`latency_ms`) and the delegate's own writing time
+    # (`write_ms`) are different measurements and must not be confused: the first
+    # is how fast the chair answers, the second is how long the POI took to write.
     latency_ms: int | None = Field(default=None, ge=0, le=300_000)
+    write_ms: int | None = Field(default=None, ge=0, le=3_600_000)
     prompt_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     completion_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     model: str | None = Field(default=None, max_length=64)
@@ -858,6 +862,7 @@ def add_rep(session_id: str, payload: RepRequest, request: Request) -> dict[str,
         poi=payload.poi,
         poi_chars=len(payload.poi or ""),
         latency_ms=payload.latency_ms,
+        write_ms=payload.write_ms,
         prompt_tokens=payload.prompt_tokens,
         completion_tokens=payload.completion_tokens,
         model=payload.model,

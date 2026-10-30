@@ -3,7 +3,7 @@ import { googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
-import { fetchHistory } from '../lib/practice.js';
+import { fetchHistory, fetchProfile, saveAnswerPreference } from '../lib/practice.js';
 import { sessionHash, ADMIN_HASH } from '../lib/route.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
@@ -166,6 +166,36 @@ export default function Splash({
     loadSessionHistory(session?.sub).map((entry) => ({ ...entry, id: '' }))
   );
 
+  // "Save my answers". The server already enforces the switch; this is only the
+  // handle. It starts On, which is what a new account gets, and follows whatever
+  // the profile says once that answers — an account that opted out stays out.
+  const [storeAnswers, setStoreAnswers] = useState(true);
+  const [savingAnswers, setSavingAnswers] = useState(false);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    let cancelled = false;
+    fetchProfile().then((profile) => {
+      if (cancelled || !profile) return;
+      if (typeof profile.store_answers === 'boolean') setStoreAnswers(profile.store_answers);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const toggleStoreAnswers = async () => {
+    // Flipped on screen first: a switch that waits for the network feels broken.
+    // A refusal puts it back, so the card never claims a setting the server did
+    // not accept.
+    const next = !storeAnswers;
+    setStoreAnswers(next);
+    setSavingAnswers(true);
+    const saved = await saveAnswerPreference(next);
+    setSavingAnswers(false);
+    if (!saved) setStoreAnswers(!next);
+  };
+
   useEffect(() => {
     let cancelled = false;
     const syncFromStorage = () =>
@@ -290,6 +320,35 @@ export default function Splash({
                 </div>
                 <button type="button" className="logout-btn" onClick={handleSignOut}>
                   Sign Out
+                </button>
+              </div>
+
+              {/* The delegate's own copy of the answer-storage policy. It sits in
+                  the profile card because it is about them, not about a session:
+                  the server enforces it on every write, so turning it off now also
+                  decides what a replay from next week will be able to show. */}
+              <div className="profile-pref">
+                <div className="profile-pref-text">
+                  <span className="profile-pref-label">Save my answers</span>
+                  <span className="profile-pref-hint">
+                    {storeAnswers
+                      ? 'Kept so a past run can be reread in full, with the chair’s notes.'
+                      : 'Only marks are kept. The answer text and the chair’s notes are discarded.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={storeAnswers}
+                  aria-label="Save my answers"
+                  className={`switch ${storeAnswers ? 'is-on' : ''}`.trim()}
+                  disabled={savingAnswers}
+                  onClick={toggleStoreAnswers}
+                >
+                  <span className="switch-track" aria-hidden="true">
+                    <span className="switch-knob" />
+                  </span>
+                  <span className="switch-state">{storeAnswers ? 'On' : 'Off'}</span>
                 </button>
               </div>
               {/* Only the deployment's admin sees this. The flag comes back from

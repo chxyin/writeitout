@@ -73,6 +73,11 @@ create table if not exists reps (
   constructive_feedback text,
   rewritten_poi     text,
   rewrite_explanation text,
+  -- How long the delegate had the speech on screen before submitting, measured
+  -- by the browser. This is the practice-time signal: against seconds_per_rep it
+  -- says how much of the clock was used, and without a clock it is simply how
+  -- long one written POI takes. The grader's own speed is `latency_ms`.
+  write_ms          integer,
   latency_ms        integer,
   prompt_tokens     integer,
   completion_tokens integer,
@@ -90,6 +95,7 @@ alter table reps add column if not exists reasoning text;
 alter table reps add column if not exists constructive_feedback text;
 alter table reps add column if not exists rewritten_poi text;
 alter table reps add column if not exists rewrite_explanation text;
+alter table reps add column if not exists write_ms integer;
 
 -- Product analytics. Written by the batched ingest endpoint; rolled up nightly.
 create table if not exists events (

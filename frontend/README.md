@@ -74,6 +74,30 @@ run, as an active delegate, and as spend, and that every day is a Hong Kong day.
 `/api/auth/google` returns `is_admin` so the start screen can show the link; that
 flag is cosmetic, the endpoint checks the token for itself.
 
+Below the headline numbers the page answers three questions the totals cannot:
+
+| Panel | What it reads |
+| --- | --- |
+| **Do they come back?** | D1/D7/D30 — the share of delegates who practised on the day, week and month after they joined — plus stickiness (today's actives ÷ the month's) and a cohort table of the last nine weeks of new accounts. All-time by nature: a 7-day window cannot hold a 30-day answer, so these ignore the range picker. |
+| **How a sitting goes** | Median and average time per sitting (Play → close), runs per sitting, how many sittings reached the end, how many stopped after one run, the share that used a clock, the share of the clock typically used, estimated words per run, and a 0 → 8+ chart of where sittings stopped. |
+| **Gone quiet** | Delegates by last graded run — a week, a fortnight, 30 days — with the ones silent for two weeks listed by name. "Never practised" is a separate count: an account that signed in and stopped there. |
+
+Two switches live on the page as well, so a policy change does not need a
+redeploy:
+
+- **What gets stored** (admin) — `Keep answers` or `Scores only`, written to
+  `app_settings` through `PATCH /api/admin/settings`. Only `full` stores text, so
+  the page offers two choices rather than the API's three modes; the switch
+  applies to new runs and never deletes what is already stored.
+- **Save my answers** (delegate, on the start screen's profile card) — the
+  account's own opt-out, `PATCH /api/profile`. The server enforces both, on every
+  write; the browser only decides what the switch shows.
+
+Writing time is recorded per run (`reps.write_ms`): the browser stamps when the
+speech appeared and sends the difference at submit, so `Clock used` is measurable
+without guessing from timestamps. It is a different number from `latency_ms`,
+which is how long the grader took.
+
 ## Scripts
 
 ```bash

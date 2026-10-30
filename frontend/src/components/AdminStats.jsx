@@ -19,6 +19,7 @@ import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
 import { fetchAdminStats, STATS_RANGES } from '../lib/stats.js';
+import { saveStorageMode } from '../lib/practice.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 import { goHome } from '../lib/route.js';
 
@@ -90,6 +91,32 @@ function StatCard({ label, value, detail, tone }) {
   );
 }
 
+/** A smaller label/figure/note triple, for the panels that come in rows. */
+function Fact({ label, value, detail }) {
+  return (
+    <div className="stats-fact">
+      <span className="stats-fact-label">{label}</span>
+      <span className="stats-fact-value">{value}</span>
+      {detail && <span className="stats-fact-detail">{detail}</span>}
+    </div>
+  );
+}
+
+/** 0.62 → "62%". The clock read is a share, not a duration. */
+function formatShare(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return `${Math.round(number * 100)}%`;
+}
+
+// Two real choices, not three: `off` and `redacted` behave identically on the
+// server — anything but `full` discards the text — so offering both would be a
+// switch that does nothing.
+const STORAGE_CHOICES = [
+  { mode: 'full', label: 'Keep answers', hint: 'Answers and the chair’s notes are stored.' },
+  { mode: 'off', label: 'Scores only', hint: 'Only marks and counts are stored. The text is dropped as it is written.' }
+];
+
 export default function AdminStats({
   session = null,
   onSignIn,
@@ -104,6 +131,12 @@ export default function AdminStats({
   // whose key no longer matches simply reads as "loading".
   const [loaded, setLoaded] = useState({ key: '', status: 'idle', data: null, message: '' });
   const [authError, setAuthError] = useState('');
+  // The deployment-wide answer-storage policy. null means "whatever the server
+  // last reported"; once the admin flips it the local value leads, so the switch
+  // does not jump back while the save is in flight.
+  const [storageMode, setStorageMode] = useState(null);
+  const [storageSaving, setStorageSaving] = useState(false);
+  const [storageError, setStorageError] = useState('');
   const { isMobile, isTablet, orientation } = useBreakpoint();
   const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
 
@@ -153,11 +186,34 @@ export default function AdminStats({
   const scores = (data && data.scores) || [];
   const topics = (data && data.topics) || [];
   const delegates = (data && data.delegates) || [];
+  const retention = (data && data.retention) || null;
+  const habits = (data && data.habits) || null;
+  const lapsed = (data && data.lapsed) || null;
+
+  // The switch reads `full` as "keep" and anything else as "scores only", which
+  // is exactly how the server decides whether to store the text.
+  const storageValue = storageMode || (data && data.storage_mode) || 'full';
+  const storageChoice = storageValue === 'full' ? 'full' : 'off';
+
+  const chooseStorage = async (mode) => {
+    if (mode === storageValue || storageSaving) return;
+    const previous = storageMode;
+    setStorageMode(mode);
+    setStorageSaving(true);
+    setStorageError('');
+    const saved = await saveStorageMode(mode);
+    setStorageSaving(false);
+    if (!saved || !saved.ok) {
+      setStorageMode(previous);
+      setStorageError('That setting could not be saved. Try again.');
+    }
+  };
 
   // Both charts scale to their own busiest bar, so a quiet week still shows its
   // shape instead of a flat line along the floor.
   const busiestDay = Math.max(1, ...daily.map((day) => day.reps));
   const busiestScore = Math.max(1, ...scores.map((row) => row.reps));
+  const busiestDropoff = Math.max(1, ...((habits && habits.dropoff) || []).map((row) => row.sessions));
 
   const handleSignIn = async ({ credential }) => {
     setAuthError('');
@@ -311,6 +367,64 @@ export default function AdminStats({
                     <strong>Days</strong>
                     <span>Every day here is a Hong Kong day, which is the day delegates experience.</span>
                   </div>
+                  <div>
+                    <strong>Back on day 1 / 7 / 30</strong>
+                    <span>
+                      Of the delegates who joined long enough ago to have had that day, the share
+                      who practised on it. Accounts too new to have had day 30 are not counted
+                      against the rate.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Stickiness</strong>
+                    <span>
+                      Today's active delegates divided by the month's. High means people come
+                      back most days; low means practice happens in bursts.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Week joined</strong>
+                    <span>
+                      One line per week of new accounts, and how many of them practised in each
+                      of the four weeks that followed. This is the "is it becoming a habit" read.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Time per sitting</strong>
+                    <span>
+                      From Play to the end of the session. A sitting that was never closed is
+                      left out, and one left open overnight is capped at four hours.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Left after one run</strong>
+                    <span>
+                      Sittings that stopped without reaching the end of their first run — the
+                      clearest sign the first thing they saw did not land.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Clock used</strong>
+                    <span>
+                      Of the time allowed, the share a delegate typically used before submitting.
+                      Only timed runs can be measured, and only from the release that started
+                      recording writing time.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>Gone quiet</strong>
+                    <span>
+                      Delegates counted from their last graded run. "Never practised" is a
+                      different problem: an account that signed in and stopped there.
+                    </span>
+                  </div>
+                  <div>
+                    <strong>What gets stored</strong>
+                    <span>
+                      Keep answers stores the text so a run can be reread; Scores only keeps the
+                      marks and counts and drops the text as it is written.
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -403,6 +517,195 @@ export default function AdminStats({
                   </p>
                 </section>
 
+                {retention && (
+                  <section className="stats-panel">
+                    <h2 className="stats-panel-title">Do they come back?</h2>
+                    <p className="stats-panel-note">
+                      All time, whatever the range above says — a 7-day window cannot hold a
+                      30-day answer.
+                    </p>
+                    <div className="stats-facts">
+                      <Fact
+                        label="Back the next day"
+                        value={formatPercent(retention.d1.rate)}
+                        detail={`${formatCount(retention.d1.hit)} of ${formatCount(retention.d1.of)} delegates`}
+                      />
+                      <Fact
+                        label="Back on day 7"
+                        value={formatPercent(retention.d7.rate)}
+                        detail={`${formatCount(retention.d7.hit)} of ${formatCount(retention.d7.of)}`}
+                      />
+                      <Fact
+                        label="Back on day 30"
+                        value={formatPercent(retention.d30.rate)}
+                        detail={`${formatCount(retention.d30.hit)} of ${formatCount(retention.d30.of)}`}
+                      />
+                      <Fact
+                        label="Stickiness"
+                        value={data.active.mau ? formatPercent(data.active.dau / data.active.mau) : '—'}
+                        detail={`${formatCount(data.active.dau)} today per ${formatCount(data.active.mau)} a month`}
+                      />
+                    </div>
+
+                    {retention.cohorts.length > 0 && (
+                      <div className="stats-table stats-cohorts">
+                        <div className="stats-table-head">
+                          <span>Week joined</span>
+                          <span className="stats-num">New</span>
+                          <span className="stats-num">Wk 1</span>
+                          <span className="stats-num">Wk 2</span>
+                          <span className="stats-num">Wk 3</span>
+                          <span className="stats-num">Wk 4</span>
+                        </div>
+                        {retention.cohorts
+                          .slice()
+                          .reverse()
+                          .map((row) => (
+                            <div className="stats-table-row" key={row.week}>
+                              <span className="stats-cohort-week">{formatDay(row.week)}</span>
+                              <span className="stats-num">{formatCount(row.delegates)}</span>
+                              {[row.w1, row.w2, row.w3, row.w4].map((count, band) => (
+                                <span className="stats-num" key={band}>
+                                  {row.delegates
+                                    ? `${Math.round((count / row.delegates) * 100)}%`
+                                    : '—'}
+                                </span>
+                              ))}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                    <p className="stats-chart-caption">
+                      Each row is one week's new accounts
+                      <span className="stats-chart-peak">share who practised again that week</span>
+                    </p>
+                  </section>
+                )}
+
+                {habits && (
+                  <section className="stats-panel">
+                    <h2 className="stats-panel-title">How a sitting goes</h2>
+                    <div className="stats-facts">
+                      <Fact
+                        label="Time per sitting"
+                        value={
+                          Number.isFinite(habits.median_session_seconds)
+                            ? formatDuration(habits.median_session_seconds)
+                            : '—'
+                        }
+                        detail={
+                          Number.isFinite(habits.avg_session_seconds)
+                            ? `${formatDuration(habits.avg_session_seconds)} on average`
+                            : 'no closed sitting yet'
+                        }
+                      />
+                      <Fact
+                        label="Runs per sitting"
+                        value={formatAverage(habits.avg_runs)}
+                        detail={`${formatCount(habits.sessions)} sittings in this window`}
+                      />
+                      <Fact
+                        label="Ran to the end"
+                        value={formatPercent(habits.finish_rate)}
+                        detail={`${formatCount(habits.finished)} of ${formatCount(habits.sessions)}`}
+                      />
+                      <Fact
+                        label="Left after one run"
+                        value={formatPercent(
+                          habits.sessions ? habits.one_and_done / habits.sessions : null
+                        )}
+                        detail={`${formatCount(habits.one_and_done)} sittings`}
+                      />
+                      <Fact
+                        label="With a clock"
+                        value={formatPercent(habits.timed_share)}
+                        detail={`${formatCount(habits.timed)} timed, the rest untimed`}
+                      />
+                      <Fact
+                        label="Clock used"
+                        value={formatShare(habits.median_clock_share)}
+                        detail={
+                          habits.clock_measured
+                            ? `median of ${formatCount(habits.clock_measured)} timed runs`
+                            : 'no timed run measured yet'
+                        }
+                      />
+                      <Fact
+                        label="Words per run"
+                        value={
+                          Number.isFinite(totals.avg_chars)
+                            ? formatCount(Math.round(totals.avg_chars / 6))
+                            : '—'
+                        }
+                        detail="estimated from the answer's length"
+                      />
+                    </div>
+
+                    <div
+                      className="stats-chart"
+                      role="img"
+                      aria-label="How many runs each sitting reached"
+                    >
+                      {habits.dropoff.map((row) => (
+                        <div className="stats-bar-slot" key={row.runs}>
+                          <div
+                            className={`stats-bar ${row.sessions === 0 ? 'is-empty' : ''}`.trim()}
+                            style={{ height: `${Math.round((row.sessions / busiestDropoff) * 100)}%` }}
+                            title={`${row.runs}${row.runs === 8 ? '+' : ''} runs: ${row.sessions} sittings`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="stats-chart-caption">
+                      Runs reached per sitting, 0 → 8+
+                      <span className="stats-chart-peak">where people stop</span>
+                    </p>
+                  </section>
+                )}
+
+                {lapsed && (
+                  <section className="stats-panel">
+                    <h2 className="stats-panel-title">Gone quiet</h2>
+                    <div className="stats-facts">
+                      <Fact label="Practised this week" value={formatCount(lapsed.active_7)} />
+                      <Fact label="This fortnight" value={formatCount(lapsed.active_14)} />
+                      <Fact label="Silent 14+ days" value={formatCount(lapsed.quiet_14)} />
+                      <Fact label="Silent 30+ days" value={formatCount(lapsed.quiet_30)} />
+                      <Fact
+                        label="Never practised"
+                        value={formatCount(lapsed.never)}
+                        detail="signed in, no run yet"
+                      />
+                    </div>
+
+                    {lapsed.delegates.length === 0 ? (
+                      <p className="stats-empty">Nobody has been away for two weeks.</p>
+                    ) : (
+                      <div className="stats-table stats-lapsed">
+                        <div className="stats-table-head">
+                          <span>Delegate</span>
+                          <span className="stats-num">Runs</span>
+                          <span className="stats-num">Last run</span>
+                        </div>
+                        {lapsed.delegates.map((row) => (
+                          <div className="stats-table-row" key={row.email || row.name || row.days_ago}>
+                            <span className="stats-delegate">
+                              <span className="stats-delegate-name">{row.name || 'Delegate'}</span>
+                              {row.email && <span className="stats-delegate-email">{row.email}</span>}
+                            </span>
+                            <span className="stats-num">{formatCount(row.reps)}</span>
+                            <span className="stats-num">
+                              {row.days_ago === 1
+                                ? 'yesterday'
+                                : `${formatCount(row.days_ago)} days ago`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
+
                 <div className="stats-columns">
                   <section className="stats-panel">
                     <h2 className="stats-panel-title">Score spread</h2>
@@ -469,8 +772,38 @@ export default function AdminStats({
                   )}
                 </section>
 
+                <section className="stats-panel stats-storage">
+                  <h2 className="stats-panel-title">What gets stored</h2>
+                  <p className="stats-panel-note">
+                    New runs only — changing this does not delete answers already saved. A
+                    delegate can still opt out on their own profile card.
+                  </p>
+                  <div className="stats-choice" role="group" aria-label="Answer storage">
+                    {STORAGE_CHOICES.map((choice) => {
+                      const active = storageChoice === choice.mode;
+                      return (
+                        <button
+                          key={choice.mode}
+                          type="button"
+                          className={`stats-choice-btn ${active ? 'is-active' : ''}`.trim()}
+                          aria-pressed={active}
+                          disabled={storageSaving}
+                          onClick={() => chooseStorage(choice.mode)}
+                        >
+                          <span className="stats-choice-label">{choice.label}</span>
+                          <span className="stats-choice-hint">{choice.hint}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {storageError && <p className="auth-error" role="alert">{storageError}</p>}
+                  <p className="stats-footnote">
+                    {storageSaving ? 'Saving…' : 'Changes take effect immediately.'}
+                  </p>
+                </section>
+
                 <p className="stats-footnote">
-                  Answers stored: {data.storage_mode} · grader: {data.model} ·{' '}
+                  Answers stored: {storageValue} · grader: {data.model} ·{' '}
                   {formatCount(totals.prompt_tokens + totals.completion_tokens)} tokens in this window
                 </p>
               </>

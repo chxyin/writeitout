@@ -290,6 +290,12 @@ export default function App() {
   // timers to one a minute (and iOS suspends them), which used to hand back
   // minutes of extra time and fire the auto-submit late.
   const deadlineRef = useRef(0);
+  // When the rep on screen appeared, in epoch milliseconds. Every path that puts
+  // a rep up — the first one, Next ›, and ‹ Prev reopening an old one — goes
+  // through `startClock`, so the time the delegate spent writing is simply "now
+  // minus this" at submit. It is a different measurement from the grade's own
+  // `latency_ms`, which is how long the chair took to answer.
+  const repOpenedRef = useRef(0);
   // True once this rep's clock has auto-submitted it. Cleared by everything that
   // puts a rep (or a fresh clock) on screen, so a rep can be sent by the timer
   // only once per countdown — and the graded entry that comes back can never
@@ -392,6 +398,9 @@ export default function App() {
   // check both read as "no clock".
   const startClock = useCallback(() => {
     deadlineRef.current = repSeconds > 0 ? Date.now() + repSeconds * 1000 : 0;
+    // The writing-time stopwatch starts with the countdown, whether or not there
+    // is a countdown at all.
+    repOpenedRef.current = Date.now();
     setTimeLeft(repSeconds);
   }, [repSeconds]);
 
@@ -641,6 +650,11 @@ export default function App() {
           rewritten_poi: clip(data.rewritten_poi, 4000),
           rewrite_explanation: clip(data.rewrite_explanation, 2000),
           latency_ms: data.latency_ms ?? null,
+          // Time from the speech appearing to this submit. Capped at an hour:
+          // a rep reopened after lunch is not a one-hour answer.
+          write_ms: repOpenedRef.current
+            ? Math.min(Date.now() - repOpenedRef.current, 3_600_000)
+            : null,
           prompt_tokens: data.usage?.prompt_tokens ?? null,
           completion_tokens: data.usage?.completion_tokens ?? null,
           model: data.usage?.model ?? null

@@ -1,5 +1,30 @@
 # Versions
 
+## Version 1.2 - Practice Statistics and Answer Storage
+
+Builds on v1.1. The developer view grows from "how much was graded" to "is this
+being used as a habit", and the two answer-storage policies become switches
+instead of environment variables.
+
+- **Retention.** `#/admin` now reads D1/D7/D30 (the share who practised on the
+  day, week and month after joining), stickiness (today's actives ÷ the month's)
+  and a nine-week cohort table of new accounts. All-time by design: a 7-day
+  window cannot hold a 30-day answer, so these ignore the range picker.
+- **How a sitting goes.** Median and average time per sitting, runs per sitting,
+  finish rate, "left after one run", the share of sittings that used a clock, the
+  share of the clock typically used, estimated words per run, and a chart of
+  where sittings stopped.
+- **Gone quiet.** Delegates by last graded run, with the ones silent for two
+  weeks listed by name, and a separate count for accounts that signed in and
+  never practised.
+- **Writing time is recorded.** Each run stores `write_ms` — the time from the
+  speech appearing to the submit — which is what makes "clock used" measurable.
+  It is separate from `latency_ms`, the grader's own round-trip.
+- **Answer storage is switchable.** `What gets stored` on `#/admin` (keep answers
+  or scores only) and `Save my answers` on the profile card. Both were already
+  enforced server-side; now neither needs a redeploy or a database edit. The
+  admin switch affects new runs and never deletes what is already stored.
+
 ## Version 1.1 - Locked Mobile Shell, Unlimited POI, Persisted Zoom
 
 Tag: `v1.1`. Builds on the componentized architecture and the responsive tier work.

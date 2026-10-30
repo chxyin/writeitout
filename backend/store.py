@@ -54,6 +54,17 @@ def _iso(value: Any) -> Any:
     return value.isoformat() if hasattr(value, "isoformat") else value
 
 
+def _median(values: Iterable[float]) -> float | None:
+    """The middle of a sorted copy, averaging the pair when the count is even."""
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[middle])
+    return (float(ordered[middle - 1]) + float(ordered[middle])) / 2
+
+
 def next_streak(last: date | None, current: int, today: date) -> int:
     """Today already practised → keep; yesterday → add one; otherwise restart."""
     if last is None:
@@ -124,6 +135,7 @@ class Store:
         constructive_feedback: str | None = None,
         rewritten_poi: str | None = None,
         rewrite_explanation: str | None = None,
+        write_ms: int | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -303,6 +315,7 @@ class MemoryStore(Store):
         constructive_feedback: str | None = None,
         rewritten_poi: str | None = None,
         rewrite_explanation: str | None = None,
+        write_ms: int | None = None,
     ) -> None:
         keep_text = self.should_store_answers(sub)
         with self._lock:
@@ -326,6 +339,7 @@ class MemoryStore(Store):
                 "rewritten_poi": rewritten_poi if keep_text else None,
                 "rewrite_explanation": rewrite_explanation if keep_text else None,
                 "latency_ms": latency_ms,
+                "write_ms": write_ms,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "model": model,
@@ -500,6 +514,121 @@ class MemoryStore(Store):
             floor = now - timedelta(days=window_days)
             return len({t["user_sub"] for t in ticks if t["created_at"] >= floor})
 
+        # ---- lifecycle: retention, cohorts, who has gone quiet ------------- #
+        today = now.date()
+        joined_on = {str(d["user_sub"]): day_of(d["created_at"]) for d in delegates}
+        practice_days: dict[str, set[date]] = {}
+        for rep in reps:
+            practice_days.setdefault(str(rep["user_sub"]), set()).add(
+                day_of(rep["created_at"])
+            )
+
+        def returned_after(offset: int) -> dict[str, Any]:
+            """Share of delegates who practised exactly `offset` days later."""
+            eligible = [
+                sub for sub, day in joined_on.items() if (today - day).days >= offset
+            ]
+            hits = [
+                sub
+                for sub in eligible
+                if any((day - joined_on[sub]).days == offset for day in practice_days.get(sub, ()))
+            ]
+            return {
+                "rate": round(len(hits) / len(eligible), 4) if eligible else None,
+                "hit": len(hits),
+                "of": len(eligible),
+            }
+
+        def practised_between(sub: str, low: date, high: date) -> bool:
+            return any(low <= day <= high for day in practice_days.get(sub, ()))
+
+        cohort_buckets: dict[date, list[str]] = {}
+        nine_weeks_ago = today - timedelta(weeks=9)
+        for sub, day in joined_on.items():
+            if day < nine_weeks_ago:
+                continue
+            cohort_buckets.setdefault(day - timedelta(days=day.weekday()), []).append(sub)
+
+        cohort_rows = []
+        for week in sorted(cohort_buckets):
+            members = cohort_buckets[week]
+            row: dict[str, Any] = {
+                "week": week.isoformat(),
+                "delegates": len(members),
+                "w1": 0,
+                "w2": 0,
+                "w3": 0,
+                "w4": 0,
+            }
+            for band in range(4):
+                low = week + timedelta(days=7 * band)
+                high = low + timedelta(days=6)
+                row[f"w{band + 1}"] = len(
+                    [sub for sub in members if practised_between(sub, low, high)]
+                )
+            cohort_rows.append(row)
+
+        quiet_rows = []
+        active_7 = active_14 = quiet_30 = never = 0
+        for delegate in delegates:
+            last = delegate.get("last_practice_on")
+            if isinstance(last, datetime):
+                last = last.astimezone(HK).date()
+            if last is None:
+                never += 1
+                continue
+            days_ago = (today - last).days
+            if days_ago <= 7:
+                active_7 += 1
+            if days_ago <= 14:
+                active_14 += 1
+            if days_ago > 30:
+                quiet_30 += 1
+            if days_ago > 14:
+                quiet_rows.append(
+                    {
+                        "email": delegate.get("email") or "",
+                        "name": delegate.get("display_name") or "",
+                        "reps": int(delegate.get("total_reps") or 0),
+                        "last_practice_on": last.isoformat(),
+                        "days_ago": days_ago,
+                    }
+                )
+        quiet_rows.sort(key=lambda row: row["days_ago"])
+
+        # ---- habits: how a sitting is shaped ------------------------------- #
+        sessions_by_id = {str(s["id"]): s for s in sessions}
+        lengths = []
+        for session in recent_sessions:
+            ended = session.get("ended_at")
+            if ended is None:
+                continue
+            # Same clamp as the SQL: an unclosed tab is not a four-hour practice.
+            lengths.append(
+                min(max((ended - session["started_at"]).total_seconds(), 0), 14400)
+            )
+
+        dropoff_map: dict[int, int] = {}
+        for session in recent_sessions:
+            bucket = min(int(session.get("reps_done") or 0), 8)
+            dropoff_map[bucket] = dropoff_map.get(bucket, 0) + 1
+
+        clock_shares = []
+        write_seconds = []
+        for rep in recent_reps:
+            write_ms = rep.get("write_ms")
+            if write_ms is None:
+                continue
+            session = sessions_by_id.get(str(rep.get("session_id")))
+            allotted = int((session or {}).get("seconds_per_rep") or 0)
+            if not allotted:
+                continue
+            clock_shares.append(min(int(write_ms), allotted * 1000) / (allotted * 1000))
+            write_seconds.append(int(write_ms) / 1000)
+
+        def rate(part: int, whole_count: int) -> float | None:
+            return round(part / whole_count, 4) if whole_count else None
+
         return {
             "days": days,
             "totals": {
@@ -522,6 +651,11 @@ class MemoryStore(Store):
                 if scores
                 else None,
                 "avg_latency_ms": round(sum(latencies) / len(latencies)) if latencies else None,
+                "avg_chars": (
+                    round(sum(int(r.get("poi_chars") or 0) for r in recent_reps) / len(recent_reps))
+                    if recent_reps
+                    else None
+                ),
                 "prompt_tokens": sum(int(r.get("prompt_tokens") or 0) for r in recent_reps),
                 "completion_tokens": sum(
                     int(r.get("completion_tokens") or 0) for r in recent_reps
@@ -532,6 +666,67 @@ class MemoryStore(Store):
                 "dau": active_within(1),
                 "wau": active_within(7),
                 "mau": active_within(30),
+            },
+            # All-time by nature: a 7-day window cannot hold a 30-day read.
+            "retention": {
+                "d1": returned_after(1),
+                "d7": returned_after(7),
+                "d30": returned_after(30),
+                "cohorts": cohort_rows,
+            },
+            "habits": {
+                "sessions": len(recent_sessions),
+                "finished": len([s for s in recent_sessions if s.get("completed")]),
+                "timed": len([s for s in recent_sessions if int(s.get("seconds_per_rep") or 0) > 0]),
+                "one_and_done": len(
+                    [
+                        s
+                        for s in recent_sessions
+                        if int(s.get("reps_done") or 0) <= 1 and not s.get("completed")
+                    ]
+                ),
+                "finish_rate": rate(
+                    len([s for s in recent_sessions if s.get("completed")]),
+                    len(recent_sessions),
+                ),
+                "timed_share": rate(
+                    len([s for s in recent_sessions if int(s.get("seconds_per_rep") or 0) > 0]),
+                    len(recent_sessions),
+                ),
+                "avg_session_seconds": round(sum(lengths) / len(lengths)) if lengths else None,
+                "median_session_seconds": (
+                    round(_median(lengths)) if lengths else None
+                ),
+                "avg_runs": (
+                    round(
+                        sum(
+                            min(int(s.get("reps_done") or 0), int(s.get("reps_target") or 0))
+                            for s in recent_sessions
+                        )
+                        / len(recent_sessions),
+                        2,
+                    )
+                    if recent_sessions
+                    else None
+                ),
+                "dropoff": [
+                    {"runs": runs, "sessions": dropoff_map.get(runs, 0)} for runs in range(0, 9)
+                ],
+                "clock_measured": len(clock_shares),
+                "median_clock_share": (
+                    round(float(_median(clock_shares)), 4) if clock_shares else None
+                ),
+                "avg_write_seconds": (
+                    round(sum(write_seconds) / len(write_seconds)) if write_seconds else None
+                ),
+            },
+            "lapsed": {
+                "active_7": active_7,
+                "active_14": active_14,
+                "quiet_14": len(quiet_rows),
+                "quiet_30": quiet_30,
+                "never": never,
+                "delegates": quiet_rows[:8],
             },
             "daily": daily,
             # Every mark from 1 to 10, including the ones nobody scored: a spread
@@ -729,6 +924,7 @@ class PostgresStore(Store):
         constructive_feedback: str | None = None,
         rewritten_poi: str | None = None,
         rewrite_explanation: str | None = None,
+        write_ms: int | None = None,
     ) -> None:
         keep_text = self.should_store_answers(sub)
         with self._conn() as conn:
@@ -738,9 +934,9 @@ class PostgresStore(Store):
                                   timed_out, poi, poi_chars, prompt_text, grade_label,
                                   reasoning, constructive_feedback, rewritten_poi,
                                   rewrite_explanation, latency_ms, prompt_tokens,
-                                  completion_tokens, model)
+                                  completion_tokens, model, write_ms)
                 values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s)
+                        %s, %s, %s, %s, %s)
                 on conflict (id) do nothing
                 returning id
                 """,
@@ -753,7 +949,7 @@ class PostgresStore(Store):
                     constructive_feedback if keep_text else None,
                     rewritten_poi if keep_text else None,
                     rewrite_explanation if keep_text else None,
-                    latency_ms, prompt_tokens, completion_tokens, model,
+                    latency_ms, prompt_tokens, completion_tokens, model, write_ms,
                 ),
             ).fetchone()
             if inserted is None:
@@ -941,6 +1137,7 @@ class PostgresStore(Store):
                     avg(score) as avg_score,
                     percentile_cont(0.5) within group (order by score::float8) as median_score,
                     avg(latency_ms) filter (where latency_ms is not null) as avg_latency_ms,
+                    avg(poi_chars) as avg_chars,
                     coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                     coalesce(sum(completion_tokens), 0) as completion_tokens
                 from reps
@@ -1040,6 +1237,164 @@ class PostgresStore(Store):
                 """
             ).fetchall()
 
+            # Retention. A delegate "came back on day N" when they had a run
+            # exactly N Hong Kong days after the day they first signed in — the
+            # usual D1/D7/D30 read. A signup that has not yet had those days is
+            # left out of the denominator instead of being counted as lost.
+            retention = conn.execute(
+                """
+                with joined as (
+                    select user_sub, (created_at at time zone 'Asia/Hong_Kong')::date as day
+                    from delegates
+                ),
+                marks as (
+                    select j.user_sub, j.day,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   - j.day = 1) as d1,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   - j.day = 7) as d7,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   - j.day = 30) as d30
+                    from joined j left join reps r on r.user_sub = j.user_sub
+                    group by j.user_sub, j.day
+                )
+                select
+                    count(*) filter (where day <= current_date - 1) as n1,
+                    count(*) filter (where day <= current_date - 1 and d1) as r1,
+                    count(*) filter (where day <= current_date - 7) as n7,
+                    count(*) filter (where day <= current_date - 7 and d7) as r7,
+                    count(*) filter (where day <= current_date - 30) as n30,
+                    count(*) filter (where day <= current_date - 30 and d30) as r30
+                from marks
+                """
+            ).fetchone()
+
+            # Cohorts: everyone who joined in the same week, and how many of them
+            # were back in each of the following four weeks. This is the habit
+            # question the totals cannot answer — "do new delegates come back".
+            cohorts = conn.execute(
+                """
+                with joined as (
+                    select user_sub,
+                           date_trunc('week', created_at at time zone 'Asia/Hong_Kong')::date
+                               as week
+                    from delegates
+                    where created_at > now() - interval '9 weeks'
+                ),
+                marks as (
+                    select j.user_sub, j.week,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   between j.week and j.week + 6) as w1,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   between j.week + 7 and j.week + 13) as w2,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   between j.week + 14 and j.week + 20) as w3,
+                           bool_or((r.created_at at time zone 'Asia/Hong_Kong')::date
+                                   between j.week + 21 and j.week + 27) as w4
+                    from joined j left join reps r on r.user_sub = j.user_sub
+                    group by j.user_sub, j.week
+                )
+                select week,
+                       count(*) as delegates,
+                       count(*) filter (where w1) as w1,
+                       count(*) filter (where w2) as w2,
+                       count(*) filter (where w3) as w3,
+                       count(*) filter (where w4) as w4
+                from marks
+                group by week
+                order by week
+                """
+            ).fetchall()
+
+            # Who has gone quiet. `never` is a signed-in account with no graded
+            # run at all — a different problem from a delegate who stopped.
+            lapsed_counts = conn.execute(
+                """
+                select
+                    count(*) filter (where last_practice_on >= current_date - 7)
+                        as active_7,
+                    count(*) filter (where last_practice_on >= current_date - 14)
+                        as active_14,
+                    count(*) filter (where last_practice_on is not null
+                                     and last_practice_on < current_date - 14)
+                        as quiet_14,
+                    count(*) filter (where last_practice_on is not null
+                                     and last_practice_on < current_date - 30)
+                        as quiet_30,
+                    count(*) filter (where last_practice_on is null) as never
+                from delegates
+                """
+            ).fetchone()
+
+            lapsed = conn.execute(
+                """
+                select email, display_name, total_reps, last_practice_on,
+                       (current_date - last_practice_on) as days_ago
+                from delegates
+                where last_practice_on is not null and last_practice_on < current_date - 14
+                order by last_practice_on desc
+                limit 8
+                """
+            ).fetchall()
+
+            # How a sitting is actually shaped: how long, how many runs, and how
+            # often the delegate walked away before the last run. A session that
+            # was never closed is left out of the length averages — its end time is
+            # the moment the tab was next opened, not a practice duration — and one
+            # left open overnight is capped at four hours for the same reason.
+            habits = conn.execute(
+                f"""
+                select
+                    count(*) as sessions,
+                    count(*) filter (where completed) as finished,
+                    count(*) filter (where seconds_per_rep > 0) as timed,
+                    count(*) filter (where reps_done <= 1 and not completed) as one_and_done,
+                    avg(case when ended_at is not null then
+                        least(greatest(extract(epoch from (ended_at - started_at)), 0), 14400)
+                    end) as avg_seconds,
+                    percentile_cont(0.5) within group (
+                        order by case when ended_at is not null then
+                            least(greatest(extract(epoch from (ended_at - started_at)), 0), 14400)
+                        end
+                    ) as median_seconds,
+                    avg(least(reps_done, reps_target)) as avg_runs
+                from practice_sessions
+                where started_at > now() - {window}
+                """,
+                (days,),
+            ).fetchone()
+
+            # Where the run count lands, bucketed at 8+: the drop-off shape.
+            dropoff = conn.execute(
+                f"""
+                select least(reps_done, 8) as runs, count(*) as sessions
+                from practice_sessions
+                where started_at > now() - {window}
+                group by 1
+                """,
+                (days,),
+            ).fetchall()
+
+            # How much of the clock the delegate used, for runs that had a clock
+            # and a recorded writing time. The median is the honest number: one
+            # run submitted after a coffee break would drag an average.
+            clock = conn.execute(
+                f"""
+                select
+                    count(*) as measured,
+                    percentile_cont(0.5) within group (
+                        order by least(r.write_ms, s.seconds_per_rep * 1000)::float8
+                                 / (s.seconds_per_rep * 1000)
+                    ) as median_share,
+                    avg(r.write_ms) / 1000.0 as avg_seconds
+                from reps r join practice_sessions s on s.id = r.session_id
+                where r.created_at > now() - {window}
+                  and r.write_ms is not null
+                  and s.seconds_per_rep > 0
+                """,
+                (days,),
+            ).fetchone()
+
         by_day = {row["day"]: row for row in daily_reps}
         sessions_by_day = {row["day"]: row for row in daily_sessions}
         ticks_by_day = {row["day"]: row for row in daily_ticks}
@@ -1087,6 +1442,27 @@ class PostgresStore(Store):
                 }
             )
 
+        def share(hit: Any, of: Any) -> float | None:
+            """A rate with an empty denominator stays null, never 0.0."""
+            total = whole(of)
+            return round(whole(hit) / total, 4) if total else None
+
+        def seconds(value: Any) -> int | None:
+            return int(round(float(value))) if value is not None else None
+
+        dropoff_map = {int(row["runs"]): whole(row["sessions"]) for row in dropoff}
+        cohort_rows = [
+            {
+                "week": row["week"].isoformat() if hasattr(row["week"], "isoformat") else str(row["week"]),
+                "delegates": whole(row["delegates"]),
+                "w1": whole(row["w1"]),
+                "w2": whole(row["w2"]),
+                "w3": whole(row["w3"]),
+                "w4": whole(row["w4"]),
+            }
+            for row in cohorts
+        ]
+
         return {
             "days": days,
             "totals": {
@@ -1111,6 +1487,7 @@ class PostgresStore(Store):
                     if reps["avg_latency_ms"] is not None
                     else None
                 ),
+                "avg_chars": seconds(reps["avg_chars"]),
                 "prompt_tokens": whole(reps["prompt_tokens"]),
                 "completion_tokens": whole(reps["completion_tokens"]),
                 "active_seconds": whole(ticks["ticks"]) * 60,
@@ -1119,6 +1496,53 @@ class PostgresStore(Store):
                 "dau": whole(activity["dau"]),
                 "wau": whole(activity["wau"]),
                 "mau": whole(activity["mau"]),
+            },
+            # Retention is all-time by nature: a 7-day window cannot hold a
+            # 30-day read, so these numbers ignore the picker and say so on screen.
+            "retention": {
+                "d1": {"rate": share(retention["r1"], retention["n1"]),
+                       "hit": whole(retention["r1"]), "of": whole(retention["n1"])},
+                "d7": {"rate": share(retention["r7"], retention["n7"]),
+                       "hit": whole(retention["r7"]), "of": whole(retention["n7"])},
+                "d30": {"rate": share(retention["r30"], retention["n30"]),
+                        "hit": whole(retention["r30"]), "of": whole(retention["n30"])},
+                "cohorts": cohort_rows,
+            },
+            "habits": {
+                "sessions": whole(habits["sessions"]),
+                "finished": whole(habits["finished"]),
+                "timed": whole(habits["timed"]),
+                "one_and_done": whole(habits["one_and_done"]),
+                "finish_rate": share(habits["finished"], habits["sessions"]),
+                "timed_share": share(habits["timed"], habits["sessions"]),
+                "avg_session_seconds": seconds(habits["avg_seconds"]),
+                "median_session_seconds": seconds(habits["median_seconds"]),
+                "avg_runs": number(habits["avg_runs"]),
+                "dropoff": [
+                    {"runs": runs, "sessions": dropoff_map.get(runs, 0)}
+                    for runs in range(0, 9)
+                ],
+                # Time against the clock, for runs that actually had one.
+                "clock_measured": whole(clock["measured"]),
+                "median_clock_share": number(clock["median_share"]),
+                "avg_write_seconds": seconds(clock["avg_seconds"]),
+            },
+            "lapsed": {
+                "active_7": whole(lapsed_counts["active_7"]),
+                "active_14": whole(lapsed_counts["active_14"]),
+                "quiet_14": whole(lapsed_counts["quiet_14"]),
+                "quiet_30": whole(lapsed_counts["quiet_30"]),
+                "never": whole(lapsed_counts["never"]),
+                "delegates": [
+                    {
+                        "email": row.get("email") or "",
+                        "name": row.get("display_name") or "",
+                        "reps": whole(row.get("total_reps")),
+                        "last_practice_on": _iso(row.get("last_practice_on")),
+                        "days_ago": whole(row.get("days_ago")),
+                    }
+                    for row in lapsed
+                ],
             },
             "daily": daily,
             # Every mark from 1 to 10, including the ones nobody scored: a spread
