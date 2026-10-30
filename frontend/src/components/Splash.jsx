@@ -13,6 +13,7 @@ import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // 20px grid pattern keeps working. `?raw` is a Vite built-in, so the file in
 // src/assets stays the single source of truth.
 import logoMarkup from '../assets/writeitout.svg?raw';
+import { CHRONO } from '../lib/timer.js';
 
 // Splash screen values. Reps is the session length and the timer is the per-rep
 // countdown in seconds, 0 meaning off — a session starts with no clock, and the
@@ -33,9 +34,11 @@ const REPS_OPTIONS = [
 
 // N/A is 0 — the same "no clock" value a timed session runs down to — so the
 // segment is a real choice rather than a placeholder, and the picker opens on it.
+// Chrono is the other kind of clock: a stopwatch that counts up and never submits
+// for you, for a delegate who wants the time on screen without a deadline.
 const TIMER_OPTIONS = [
   { value: 0, label: 'N/A' },
-  { value: 15, label: '15s' },
+  { value: CHRONO, label: 'Chrono' },
   { value: 30, label: '30s' },
   { value: 45, label: '45s' },
   { value: CUSTOM, label: 'Custom' }

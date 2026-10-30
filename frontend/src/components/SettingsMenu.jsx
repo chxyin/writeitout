@@ -3,8 +3,9 @@ import { ZOOM_RANGE } from '../lib/zoom.js';
 import {
   COLOR_THEMES,
   BACKGROUNDS,
-  NIGHT_HUE_RANGE,
-  NIGHT_STRENGTH_RANGE,
+  NIGHT_KELVIN_MARKS,
+  NIGHT_KELVIN_RANGE,
+  nightLabel,
   nightTint
 } from '../lib/appearance.js';
 import {
@@ -30,12 +31,9 @@ const asPercent = (value) => `${Math.round(value * 100)}%`;
 const asVh = (value) => `${value}vh`;
 const asRem = (value) => `${value}rem`;
 const asPx = (value) => `${value}px`;
-// A hue angle, not a percentage: "45°" is what the slider in a colour picker
-// would say, and it is the unit the CSS custom property takes.
-const asHue = (value) => `${value}°`;
-// Night light strength is a plain 0–100 percentage, the unit the reference
-// design used ("Night Light 33%").
-const asPercentOf100 = (value) => `${value}%`;
+// Night light temperature reads as a colour temperature, with the daylight end
+// spelled out as "off" because that is what it is.
+const asKelvin = (value) => nightLabel(value);
 
 /**
  * One preference row: a minus / range / plus control with the readout doubling
@@ -43,7 +41,7 @@ const asPercentOf100 = (value) => `${value}%`;
  * the tab looks and behaves exactly like the zoom bar it is modelled on.
  * `range` carries min / max / step / default, `formatValue` adds the unit.
  */
-function SliderRow({ label, value, range, formatValue, onChange }) {
+function SliderRow({ label, value, range, formatValue, onChange, footnote }) {
   const stepBy = (direction) => onChange(clampValue(value + direction * range.step, range));
 
   return (
@@ -88,6 +86,7 @@ function SliderRow({ label, value, range, formatValue, onChange }) {
           aria-label={`Increase ${label}`}
         >+</button>
       </div>
+      {footnote}
     </div>
   );
 }
@@ -107,10 +106,10 @@ export default function SettingsMenu({
   onLowIntensityToggle,
   nightLight,
   onNightLightToggle,
-  nightStrength,
-  onNightStrengthChange,
-  nightHue,
-  onNightHueChange,
+  nightKelvin,
+  onNightKelvinChange,
+  hints,
+  onHintsToggle,
   theme,
   onThemeChange,
   background,
@@ -246,19 +245,21 @@ export default function SettingsMenu({
                 </button>
               </div>
 
-              {/* Night light. On by default, so the row carries both the switch
-                  and — when it is on — the one dial it has: the colour of the
-                  warmth. The swatch is the hue itself, which is easier to judge
-                  than a number on a screen that is already amber. */}
+              {/* Night light. On by default: a switch, plus the one dial it has —
+                  colour temperature. The swatch is the tint that dial is
+                  producing, because a number is hard to judge on a screen that is
+                  already amber. */}
               <div className="setting-item is-stacked">
                 <div className="setting-copy">
                   <span className="setting-night-label">
                     Night light
-                    <span
-                      className="setting-night-swatch"
-                      style={{ background: nightTint(nightHue) }}
-                      aria-hidden="true"
-                    />
+                    {nightLight && (
+                      <span
+                        className="setting-night-swatch"
+                        style={{ background: nightTint(nightKelvin) }}
+                        aria-hidden="true"
+                      />
+                    )}
                   </span>
                   <small>
                     {nightLight
@@ -277,24 +278,52 @@ export default function SettingsMenu({
                   <span className="toggle-knob-sm" />
                 </button>
               </div>
-              {nightLight && (
-                <>
-                  <SliderRow
-                    label="Strength"
-                    value={nightStrength}
-                    range={NIGHT_STRENGTH_RANGE}
-                    formatValue={asPercentOf100}
-                    onChange={onNightStrengthChange}
-                  />
-                  <SliderRow
-                    label="Warmth"
-                    value={nightHue}
-                    range={NIGHT_HUE_RANGE}
-                    formatValue={asHue}
-                    onChange={onNightHueChange}
-                  />
-                </>
-              )}
+              {/* The temperature row stays put even at 6000K: hiding it the
+                  moment the dial reaches daylight would snatch the slider out
+                  from under the cursor mid-drag. */}
+              <SliderRow
+                label="Temperature"
+                value={nightKelvin}
+                range={NIGHT_KELVIN_RANGE}
+                formatValue={asKelvin}
+                onChange={onNightKelvinChange}
+                footnote={
+                  <div className="setting-kelvin-scale" aria-hidden="true">
+                    <div className="setting-kelvin-bar" />
+                    <div className="setting-kelvin-labels">
+                      {NIGHT_KELVIN_MARKS.map((mark) => (
+                        <span key={mark.kelvin}>
+                          {mark.kelvin}K · {mark.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                }
+              />
+
+              {/* The tips themselves. Last of the look-and-feel rows, and it says
+                  what it does: one of the tips is that this switch exists, so a
+                  delegate who is tired of them can find the off button. */}
+              <div className="setting-item is-stacked">
+                <div className="setting-copy">
+                  <span>Show hints</span>
+                  <small>
+                    {hints
+                      ? 'One rotating tip at the foot of the start screen — formatting, night light, the switches.'
+                      : 'No tips on the start screen. This switch turns them back on.'}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hints}
+                  aria-label="Show hints"
+                  className={`toggle-switch-sm ${hints ? 'active' : ''}`}
+                  onClick={onHintsToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
+              </div>
 
               {/* The one setting that is about the account rather than the screen:
                   it lives here because this is where a delegate looks for "what

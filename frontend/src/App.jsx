@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SettingsMenu from './components/SettingsMenu.jsx';
-import { BACKGROUND_IDS, NIGHT_HUE_RANGE, NIGHT_STRENGTH_RANGE } from './lib/appearance.js';
+import {
+  BACKGROUND_IDS,
+  NIGHT_KELVIN_RANGE,
+  NIGHT_OFF_KELVIN,
+  kelvinFromStrength,
+  nightLens
+} from './lib/appearance.js';
 import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
 import {
   TOP_OFFSET_RANGE,
@@ -19,6 +25,7 @@ import { HISTORY_STORAGE_KEY, loadSessionHistory, saveSessionResult } from './li
 import useAuthSession, { authorizationHeaders } from './lib/auth.js';
 import { API_BASE_URL } from './lib/api.js';
 import { visitorId } from './lib/trial.js';
+import { countdownSeconds, isChrono } from './lib/timer.js';
 import {
   beginPracticeSession,
   closeOrphanedSession,
@@ -41,6 +48,8 @@ import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
 import TrialGate from './components/TrialGate.jsx';
+import HintsStrip from './components/HintsStrip.jsx';
+import { reportVisit } from './lib/traffic.js';
 import SessionDetail from './components/SessionDetail.jsx';
 import AdminStats from './components/AdminStats.jsx';
 import TimeUpOverlay from './components/TimeUpOverlay.jsx';
@@ -104,9 +113,11 @@ function loadLastSession() {
   }
   if (!parsed || typeof parsed !== 'object') return DEFAULT_SESSION;
   const reps = Number(parsed.reps);
-  const timer = Number(parsed.timer);
+  // The stopwatch is the one timer value that is not a number of seconds.
+  const chrono = isChrono(parsed.timer);
+  const timer = chrono ? parsed.timer : Number(parsed.timer);
   if (!Number.isInteger(reps) || reps < 1 || reps > 100) return DEFAULT_SESSION;
-  if (!Number.isInteger(timer) || timer < 0 || timer > 600) return DEFAULT_SESSION;
+  if (!chrono && (!Number.isInteger(timer) || timer < 0 || timer > 600)) return DEFAULT_SESSION;
   return { reps, timer };
 }
 
@@ -125,9 +136,14 @@ const DEFAULT_SETTINGS = {
   lowIntensity: false,
   // Night light ships on: it is the setting a delegate practising late wants
   // before they know it exists, and the switch is one press away in Settings.
-  nightLight: true,
-  nightLightStrength: NIGHT_STRENGTH_RANGE.default,
-  nightHue: NIGHT_HUE_RANGE.default,
+  // The temperature is the one dial it has; 6000K is daylight and therefore off,
+  // so this single number is both the colour and the switch. `nightLastWarm` is
+  // only memory, so the switch can come back to the warmth it left behind.
+  nightKelvin: NIGHT_KELVIN_RANGE.default,
+  nightLastWarm: NIGHT_KELVIN_RANGE.default,
+  // The rotating tips on the start screen: one place a delegate is told the
+  // Formatting tab exists, and the switch that turns them off is one of them.
+  hints: true,
   theme: 'default',
   background: 'grid',
   zoom: DEFAULT_ZOOM,
@@ -153,16 +169,30 @@ function loadSettings() {
     return DEFAULT_SETTINGS;
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_SETTINGS;
+  // Night light migration, before the object below so both fields agree. A save
+  // from the old two-dial version had a separate on/off flag: off becomes 6000K
+  // (daylight, no lens) and on is mapped from the old strength dial, where 55%
+  // lines up with 3300K. A delegate who never touched either gets the default.
+  const savedKelvin =
+    parsed.nightKelvin ??
+    (parsed.nightLight === false ? NIGHT_OFF_KELVIN : kelvinFromStrength(parsed.nightLightStrength)) ??
+    DEFAULT_SETTINGS.nightKelvin;
+  const nightKelvin = clampValue(savedKelvin, NIGHT_KELVIN_RANGE);
   return {
     animOn: Boolean(parsed.animOn ?? DEFAULT_SETTINGS.animOn),
     showTopic: Boolean(parsed.showTopic ?? DEFAULT_SETTINGS.showTopic),
     showComm: Boolean(parsed.showComm ?? DEFAULT_SETTINGS.showComm),
     lowIntensity: Boolean(parsed.lowIntensity ?? DEFAULT_SETTINGS.lowIntensity),
-    // Absent means "never chosen", and the default is on — `?? true`, not
-    // `Boolean(undefined)` which would silently ship it off.
-    nightLight: Boolean(parsed.nightLight ?? DEFAULT_SETTINGS.nightLight),
-    nightLightStrength: clampValue(parsed.nightLightStrength, NIGHT_STRENGTH_RANGE),
-    nightHue: clampValue(parsed.nightHue, NIGHT_HUE_RANGE),
+    // Absent means "never chosen", and the default is on — so a missing
+    // temperature falls back to the warm default, not to daylight.
+    nightKelvin,
+    // The warmth the switch returns to. Always a temperature that does something,
+    // because coming back to 6000K would look like a broken switch.
+    nightLastWarm: clampValue(
+      parsed.nightLastWarm ?? (nightKelvin < NIGHT_OFF_KELVIN ? nightKelvin : DEFAULT_SETTINGS.nightLastWarm),
+      NIGHT_KELVIN_RANGE
+    ),
+    hints: Boolean(parsed.hints ?? DEFAULT_SETTINGS.hints),
     theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
     // A background whose swatch has been removed (the old Glow) falls back to the
     // default instead of leaving <body> with a class nothing in index.css styles.
@@ -208,6 +238,8 @@ export default function App() {
   // Remaining seconds on the current rep when the splash screen asked for a
   // timer; 0 = the clock is off, or a timed rep has run out.
   const [timeLeft, setTimeLeft] = useState(0);
+  // Stopwatch mode's counterpart to timeLeft: seconds since the speech appeared.
+  const [elapsed, setElapsed] = useState(0);
   // null → the red "Time's Up!" card is not showing; 'in' → it is, and the clock
   // for it is running; 'out' → it is fading. The rep's countdown reaches 0:00
   // every time, so this is what makes that second visible.
@@ -346,8 +378,11 @@ export default function App() {
   // rep", so the completion screen never fires for it.
   const sessionLength = gameSettings ? gameSettings.reps : 5;
   const unlimitedSession = !Number.isFinite(sessionLength);
-  // Seconds allowed per rep, 0 meaning the timer is off.
-  const repSeconds = gameSettings ? gameSettings.timer : 0;
+  // Seconds allowed per rep, 0 meaning there is no countdown. The stopwatch is the
+  // other kind of clock: it counts up, so it has no length and nothing expires.
+  const timerSetting = gameSettings ? gameSettings.timer : 0;
+  const chrono = isChrono(timerSetting);
+  const repSeconds = countdownSeconds(timerSetting);
 
   // Settings state. Restored from localStorage on the first render, then
   // written back on every change so the app opens the way it was left.
@@ -361,9 +396,8 @@ export default function App() {
     background,
     lowIntensity,
     zoom,
-    nightLight,
-    nightLightStrength,
-    nightHue
+    nightKelvin,
+    hints
   } = settings;
   // Settings → Formatting: four free-running layout numbers, carried to CSS as
   // the --fmt-* custom properties below.
@@ -395,6 +429,26 @@ export default function App() {
 
   const updateSetting = useCallback((key, value) => {
     setSettings((previous) => ({ ...previous, [key]: value }));
+  }, []);
+
+  // The night light switch is a shortcut for the ends of its own temperature
+  // dial: off parks the dial at 6000K (daylight) after remembering the warmth,
+  // and on returns to that warmth rather than to the default.
+  const toggleNightLight = useCallback(() => {
+    setSettings((previous) => {
+      if (previous.nightKelvin < NIGHT_OFF_KELVIN) {
+        return { ...previous, nightLastWarm: previous.nightKelvin, nightKelvin: NIGHT_OFF_KELVIN };
+      }
+      return { ...previous, nightKelvin: previous.nightLastWarm };
+    });
+  }, []);
+
+  const changeNightKelvin = useCallback((value) => {
+    setSettings((previous) => ({
+      ...previous,
+      nightKelvin: value,
+      nightLastWarm: value < NIGHT_OFF_KELVIN ? value : previous.nightLastWarm
+    }));
   }, []);
 
   // Settings → panel footer. A copy of the constant rather than the constant
@@ -490,6 +544,7 @@ export default function App() {
     // is a countdown at all.
     repOpenedRef.current = Date.now();
     setTimeLeft(repSeconds);
+    setElapsed(0);
   }, [repSeconds]);
 
   const loadFirstRep = useCallback(async () => {
@@ -541,6 +596,19 @@ export default function App() {
     };
   }, [repSeconds, showFeedback, sessionComplete, currentDrill]);
 
+  // Stopwatch mode: count up from the moment this rep's speech appeared. The same
+  // interval writes the number the chip shows and nothing else — no deadline, no
+  // auto-submit — and it pauses with feedback like the countdown does. `write_ms`
+  // is captured from the same start time when the answer is sent, so what the chip
+  // showed and what the statistics record are the same measurement.
+  useEffect(() => {
+    if (!chrono || showFeedback || sessionComplete || !currentDrill) return undefined;
+    const tick = setInterval(() => {
+      setElapsed(Math.max(0, Math.floor((Date.now() - repOpenedRef.current) / 1000)));
+    }, 500);
+    return () => clearInterval(tick);
+  }, [chrono, showFeedback, sessionComplete, currentDrill]);
+
   // < Prev / Next > and ← Back share this: load a saved rep, no API call. The
   // entry's own POI is pushed back into the textarea so an old answer can still
   // be read (and re-edited) after navigating away.
@@ -561,6 +629,10 @@ export default function App() {
     if (exitTimer.current) clearTimeout(exitTimer.current);
   }, [history, startClock]);
 
+  // At 6000K the lens is daylight and does nothing, so the dial doubles as the
+  // off switch: the class only lands on <body> when there is something to show.
+  const nightOn = nightKelvin < NIGHT_OFF_KELVIN;
+
   useEffect(() => {
     document.body.className = '';
     if (theme !== 'default') document.body.classList.add(`theme-${theme}`);
@@ -569,19 +641,27 @@ export default function App() {
     if (!showComm) document.body.classList.add('hide-comm');
     document.body.classList.add(`background-${background}`);
     if (lowIntensity) document.body.classList.add('low-intensity');
-    if (nightLight) document.body.classList.add('night-light');
-  }, [theme, background, lowIntensity, animOn, showTopic, showComm, nightLight]);
+    if (nightOn) document.body.classList.add('night-light');
+  }, [theme, background, lowIntensity, animOn, showTopic, showComm, nightOn]);
 
-  // The warm cast's colour and strength. They ride on custom properties so the
-  // sliders repaint the overlay without re-running the body-class effect.
+  // The warm cast's tint and opacity, both derived from the one temperature. They
+  // ride on custom properties so dragging the dial repaints the overlay without
+  // re-running the body-class effect above.
   useEffect(() => {
-    document.documentElement.style.setProperty('--night-hue', String(nightHue));
-    document.documentElement.style.setProperty('--night-strength', String(nightLightStrength));
-  }, [nightHue, nightLightStrength]);
+    const lens = nightLens(nightKelvin);
+    document.documentElement.style.setProperty('--night-tint', lens.tint);
+    document.documentElement.style.setProperty('--night-opacity', String(lens.opacity));
+  }, [nightKelvin]);
 
   useEffect(() => {
     persistSettings(settings);
   }, [settings]);
+
+  // One arrival, logged once per page load. Fire and forget: the traffic panel is
+  // for the person running the deployment, and nothing a visitor sees waits on it.
+  useEffect(() => {
+    reportVisit({ route: window.location.hash || '#/' });
+  }, []);
 
   // Zoom rides on a single CSS variable consumed by the app shell and the
   // settings button, so the whole UI scales consistently without any layout
@@ -703,10 +783,17 @@ export default function App() {
         signOut();
         throw new Error('Your session expired. Please sign in again.');
       }
-      if (response.status === 403 && data && typeof data.detail === 'string' && data.detail.includes('enforcing sign-ins')) {
-        // The trial's second practice. The server refuses it; the page explains
-        // why and offers the sign-in in place of the answer box.
-        setTrialNotice(data.detail);
+      // A refusal here is the anonymous cap: either the admin trial switch or the
+      // two-runs-a-day limit. The server names which one, and the page puts the
+      // sign-in card in place of the answer box rather than a red error line.
+      const refusal = data ? data.detail : null;
+      const refusalText = typeof refusal === 'string' ? refusal : refusal && refusal.message;
+      const capped =
+        response.status === 403 &&
+        (refusalText?.includes('enforcing sign-ins') ||
+          (refusal && typeof refusal === 'object' && typeof refusal.code === 'string' && refusal.code.startsWith('trial.')));
+      if (capped) {
+        setTrialNotice(refusalText || '');
         setTrialBlocked(true);
         throw new Error('Sign in to keep practising.');
       }
@@ -732,13 +819,14 @@ export default function App() {
         )
       );
 
-      // A trial visitor has just spent their free practice. The server is the one
-      // counting; this only keeps the start screen's note honest without a reload.
-      setTrial((current) =>
-        current && current.trial_mode && !session
-          ? { ...current, used: current.used + 1, allowed: false }
-          : current
-      );
+      // The anonymous caps are counted by the server, so ask it again rather than
+      // guessing: one graded run just moved the needle, and the start screen's
+      // note and the Play gate both read this.
+      if (!session) {
+        fetchTrialState().then((state) => {
+          if (state) setTrial(state);
+        });
+      }
 
       // Persist the rep while the cost trail is still in hand. The recorder queues
       // it if the session row is still being created. Fire-and-forget: the
@@ -935,9 +1023,10 @@ export default function App() {
   // reps will hang from. Reps graded before that row exists are queued by the
   // recorder rather than dropped.
   const handleStart = (next) => {
-    // Trial mode: the free practice is spent, so Play asks for the sign-in
-    // instead of opening a drill the chair would then refuse to grade.
-    if (trial && trial.trial_mode && !session && !trial.allowed) {
+    // Out of free runs: Play asks for the sign-in instead of opening a drill the
+    // chair would then refuse to grade. This covers both anonymous caps — the
+    // admin trial switch and the two-a-day limit.
+    if (trial && !session && !trial.allowed) {
       setTrialNotice(trial.notice || '');
       setTrialBlocked(true);
       return;
@@ -1113,12 +1202,12 @@ export default function App() {
       onShowCommToggle={() => updateSetting('showComm', !showComm)}
       lowIntensity={lowIntensity}
       onLowIntensityToggle={() => updateSetting('lowIntensity', !lowIntensity)}
-      nightLight={nightLight}
-      onNightLightToggle={() => updateSetting('nightLight', !nightLight)}
-      nightStrength={nightLightStrength}
-      onNightStrengthChange={(value) => updateSetting('nightLightStrength', value)}
-      nightHue={nightHue}
-      onNightHueChange={(value) => updateSetting('nightHue', value)}
+      nightLight={nightOn}
+      onNightLightToggle={toggleNightLight}
+      nightKelvin={nightKelvin}
+      onNightKelvinChange={changeNightKelvin}
+      hints={hints}
+      onHintsToggle={() => updateSetting('hints', !hints)}
       theme={theme}
       onThemeChange={(value) => updateSetting('theme', value)}
       background={background}
@@ -1148,6 +1237,11 @@ export default function App() {
   // drops it: the gate belongs to "not signed in", so it needs no state reset.
   const trialGate = trialBlocked && !session ? (
     <TrialGate
+      title={
+        trial && trial.trial_mode && !trial.allowed
+          ? 'One practice, then sign in'
+          : 'Sign in to keep practising'
+      }
       notice={trialNotice || (trial && trial.notice) || ''}
       onSignIn={async (credential) => {
         const accepted = await handleSignIn(credential);
@@ -1180,13 +1274,16 @@ export default function App() {
           historyVersion={historyVersion}
           onStart={handleStart}
           trialNote={
-            trial && trial.trial_mode && !session
+            trial && !session
               ? trial.allowed
-                ? 'Trial mode: one free practice, then sign in.'
-                : 'Your free practice is used — sign in to keep going.'
+                ? trial.signed_in
+                  ? ''
+                  : `Two free runs a day without signing in — ${trial.runs_left ?? 2} left today.`
+                : 'Both free runs for today are used — sign in to keep practising.'
               : ''
           }
         />
+        <HintsStrip enabled={hints} />
         {settingsMenu}
         {trialGate}
       </>
@@ -1235,7 +1332,15 @@ export default function App() {
             <span className="progress-counter">
               {unlimitedSession ? `${gradedCount} / ∞` : `${Math.min(currentIndex + 1, sessionLength)} / ${sessionLength}`}
             </span>
-            {repSeconds > 0 && (
+            {chrono ? (
+              <span
+                className="rep-timer is-chrono"
+                role="timer"
+                title="Stopwatch — counts up until you send the answer. Nothing expires."
+              >
+                {formatClock(elapsed)}
+              </span>
+            ) : repSeconds > 0 ? (
               <span
                 className={`rep-timer ${timeLeft === 0 ? 'is-done' : ''}`.trim()}
                 role="timer"
@@ -1243,7 +1348,7 @@ export default function App() {
               >
                 {formatClock(timeLeft)}
               </span>
-            )}
+            ) : null}
           </div>
           {/* The mode switch has nothing to switch once the session is over, and
               leaving Exit Task in the row only invites an overlap in a narrow

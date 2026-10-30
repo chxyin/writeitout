@@ -104,7 +104,9 @@ export async function startPracticeSession({ reps, timer }) {
   try {
     const data = await api.post('/api/sessions', {
       reps_target: Math.max(1, Math.min(100, Math.round(reps))),
-      seconds_per_rep: Math.max(0, Math.min(600, Math.round(timer)))
+      // The stopwatch has no length to send; the run's own elapsed time is
+      // recorded per rep as write_ms, so the session row says "no countdown".
+      seconds_per_rep: Math.max(0, Math.min(600, Math.round(Number(timer) || 0)))
     });
     return data && data.session_id ? data.session_id : null;
   } catch {

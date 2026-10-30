@@ -19,6 +19,7 @@ from collections import deque
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import requests
 from dotenv import load_dotenv
@@ -176,6 +177,9 @@ auth_limiter = SlidingWindowRateLimiter(AUTH_RATE_LIMIT_REQUESTS, RATE_LIMIT_WIN
 # Events are unauthenticated, so they get a budget of their own: 60 batches a
 # minute is far more than the app sends and far less than a spammer wants.
 event_limiter = SlidingWindowRateLimiter(60, RATE_LIMIT_WINDOW_SECONDS)
+# Traffic pings are unauthenticated too, but one page load sends exactly one, so
+# the budget can be generous per address and still useless for flooding the log.
+traffic_limiter = SlidingWindowRateLimiter(120, RATE_LIMIT_WINDOW_SECONDS)
 
 
 def client_identifier(request: Request) -> str:
@@ -197,6 +201,24 @@ TRIAL_SIGNIN_COPY = (
     "compsci project. No data is tracked or sold for commercial purposes. This project "
     "wasn't created with money as a priority; it's more so for CV larp."
 )
+
+# Anonymous practice is capped at two graded runs a day, per address-derived
+# identity. This is deliberately not an admin switch: a visitor who has not signed
+# in can feel the product twice today and no more, and signing in removes the cap
+# entirely. The count comes from the runs table rather than a counter, so it cannot
+# drift out of step with what was actually practised.
+GUEST_DAILY_RUNS = 2
+GUEST_LIMIT_COPY = (
+    "That's both free runs for today — the limit is two a day until you sign in. "
+    "Signing in with Google removes it and keeps every run under your account; "
+    "the count resets at midnight."
+)
+
+
+def _hk_day_start(now: datetime | None = None) -> datetime:
+    """Midnight in Hong Kong, the moment the anonymous daily cap resets."""
+    moment = now or datetime.now(HK)
+    return datetime.combine(moment.date(), time.min, tzinfo=HK)
 
 
 def visitor_id(request: Request) -> str:
@@ -383,6 +405,107 @@ def require_admin(request: Request) -> dict[str, Any]:
 def hashed_client(request: Request) -> str:
     """A stable per-network hash, never the address itself."""
     return hashlib.sha256(f"{ANALYTICS_SALT}:{client_identifier(request)}".encode()).hexdigest()[:32]
+
+
+# --------------------------------------------------------------------------- #
+# Traffic log helpers
+#
+# Everything below turns an arrival into a row: what the browser volunteered,
+# what the edge resolved, and a short label for each. The labels are fixed
+# vocabulary on purpose — a UA string is untrusted text, and the panel never
+# needs more than "Chrome on Windows, desktop".
+# --------------------------------------------------------------------------- #
+BOT_PATTERN = re.compile(
+    r"(bot\b|crawler|spider|crawl|headless|phantomjs|curl/|wget/|python-requests|"
+    r"python-urllib|httpclient|go-http-client|monitor|preview)",
+    re.IGNORECASE,
+)
+
+BROWSER_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("Edge", r"Edg(?:e|A|iOS)?/"),
+    ("Opera", r"OPR/|\bOpera\b"),
+    ("Samsung Internet", r"SamsungBrowser/"),
+    ("Firefox", r"Firefox/|FxiOS/"),
+    ("Chrome", r"Chrome/|CriOS/"),
+    ("Safari", r"Safari/"),
+)
+
+OS_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("iOS", r"iPhone|iPad|iPod"),
+    ("Android", r"Android"),
+    ("Windows", r"Windows"),
+    ("macOS", r"Mac OS X|Macintosh"),
+    ("ChromeOS", r"CrOS"),
+    ("Linux", r"Linux|X11"),
+)
+
+
+def _clip(value: Any, limit: int) -> str | None:
+    """A short, control-character-free copy of an untrusted string."""
+    if value is None:
+        return None
+    text = re.sub(r"[\x00-\x1f\x7f]", "", str(value)).strip()
+    return text[:limit] or None
+
+
+def describe_user_agent(user_agent: str) -> dict[str, Any]:
+    """Browser, OS, device class and whether this is a robot.
+
+    A full UA parser is a dependency and a CVE surface; this deployment only ever
+    asks three questions of the string, so three ordered pattern lists answer
+    them. The order matters: Edge and Opera both claim Chrome, and every WebKit
+    browser claims Safari.
+    """
+    ua = user_agent or ""
+    browser = next((name for name, pattern in BROWSER_PATTERNS if re.search(pattern, ua)), "Other")
+    os_name = next((name for name, pattern in OS_PATTERNS if re.search(pattern, ua)), "Other")
+    bot = bool(BOT_PATTERN.search(ua)) or not ua
+    if bot:
+        device = "Bot"
+    elif "iPad" in ua or "Tablet" in ua or ("Android" in ua and "Mobile" not in ua):
+        device = "Tablet"
+    elif "Mobi" in ua or "iPhone" in ua or "iPod" in ua:
+        device = "Phone"
+    elif os_name == "Other":
+        device = "Unknown"
+    else:
+        device = "Desktop"
+    return {"browser": browser, "os": os_name, "device": device, "bot": bot}
+
+
+def edge_location(request: Request) -> dict[str, Any]:
+    """Where the platform's edge says the request came from.
+
+    Vercel resolves country, region, city, coordinates, timezone and ASN on every
+    request and forwards them as headers, so the panel gets a location with no
+    third-party lookup and no extra data leaving the deployment. Locally the
+    headers are absent and every column is simply null.
+    """
+
+    def header(name: str, limit: int = 120) -> str | None:
+        return _clip(request.headers.get(name), limit)
+
+    def number(name: str) -> float | None:
+        raw = header(name, 32)
+        try:
+            return float(raw) if raw else None
+        except ValueError:
+            return None
+
+    city = header("x-vercel-ip-city")
+    if city:
+        # The city arrives percent-encoded ("San%20Francisco").
+        city = unquote(city)
+
+    return {
+        "country": header("x-vercel-ip-country", 8),
+        "region": header("x-vercel-ip-country-region", 8),
+        "city": city,
+        "latitude": number("x-vercel-ip-latitude"),
+        "longitude": number("x-vercel-ip-longitude"),
+        "timezone": header("x-vercel-ip-timezone", 64),
+        "asn": header("x-vercel-ip-asn", 16),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1097,6 +1220,94 @@ def ingest_events(payload: EventBatch, request: Request) -> dict[str, Any]:
     return {"ok": True}
 
 
+class TrafficPing(BaseModel):
+    """What the browser can say about the device it is running on.
+
+    Every field is optional: an old browser, a locked-down one, or a fetch that is
+    cut short still logs the arrival with whatever did arrive.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    route: str | None = None
+    referrer: str | None = None
+    host: str | None = None
+    language: str | None = None
+    languages: str | None = None
+    screen: str | None = None
+    viewport: str | None = None
+    dpr: str | None = None
+    platform: str | None = None
+    cores: int | None = None
+    memory: str | None = None
+    touch: bool | None = None
+    connection: str | None = None
+    gpu: str | None = None
+    cookies: bool | None = None
+    standalone: bool | None = None
+    local_time: str | None = None
+    version: str | None = None
+    fingerprint: str | None = None
+
+
+@app.post("/api/traffic")
+def record_traffic(payload: TrafficPing, request: Request) -> dict[str, Any]:
+    """Log one arrival at the page.
+
+    Signed in or not, first visit or hundredth: every page load lands here, because
+    the traffic panel is meant to show what reaches the site, which is not the same
+    thing as who signs in. The address and the first-party visitor id are the two
+    identifiers that survive a reload; the rest is what the browser volunteers
+    about the device it is running on, and what the edge resolved about the
+    connection.
+    """
+    retry_after = traffic_limiter.retry_after(client_identifier(request))
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many visits.",
+            headers={"Retry-After": str(int(retry_after))},
+        )
+    user = optional_user(request)
+    user_agent = request.headers.get("user-agent") or ""
+    described = describe_user_agent(user_agent)
+    fingerprint = re.sub(r"[^A-Za-z0-9]", "", payload.fingerprint or "")[:64] or None
+    cores = payload.cores if payload.cores and 0 < payload.cores <= 256 else None
+    row = {
+        "ip": client_identifier(request),
+        "visitor": visitor_id(request),
+        "user_sub": user["sub"] if user else None,
+        **edge_location(request),
+        "route": _clip(payload.route, 120),
+        "referrer": _clip(payload.referrer, 300),
+        "host": _clip(payload.host, 120),
+        "user_agent": _clip(user_agent, 400),
+        "browser": described["browser"],
+        "os": described["os"],
+        "device": described["device"],
+        "bot": described["bot"],
+        "language": _clip(payload.language, 40),
+        "languages": _clip(payload.languages, 160),
+        "screen": _clip(payload.screen, 40),
+        "viewport": _clip(payload.viewport, 40),
+        "dpr": _clip(payload.dpr, 16),
+        "platform": _clip(payload.platform, 80),
+        "cores": cores,
+        "memory": _clip(payload.memory, 16),
+        "touch": payload.touch,
+        "connection": _clip(payload.connection, 80),
+        "gpu": _clip(payload.gpu, 120),
+        "cookies": payload.cookies,
+        "standalone": payload.standalone,
+        "local_time": _clip(payload.local_time, 40),
+        "app_version": _clip(payload.version, 20),
+        "fingerprint": fingerprint,
+        "ua_hash": hashlib.sha256(user_agent.encode()).hexdigest()[:16],
+    }
+    get_store().add_traffic(row)
+    return {"ok": True}
+
+
 @app.get("/api/settings")
 def read_settings() -> dict[str, Any]:
     """The switches the UI needs to know about (no secrets in here)."""
@@ -1128,21 +1339,31 @@ def write_settings(payload: AdminSettingsRequest, request: Request) -> dict[str,
 
 @app.get("/api/trial")
 def trial_state(request: Request) -> dict[str, Any]:
-    """Whether this visitor may still practise without signing in.
+    """What this visitor may still do without signing in.
 
-    A signed-in delegate is never gated: the whole point of the trial is that the
-    practice after it happens under an account.
+    Two rules stack here. Trial mode (an admin switch) allows one practice ever.
+    The everyday cap allows two graded runs a day. A signed-in delegate is never
+    gated by either: the whole point of the limit is that the practice after it
+    happens under an account.
     """
     user = optional_user(request)
     store = get_store()
     mode = store.trial_mode()
-    used = 0 if user is not None else store.trial_practices(visitor_id(request))
+    guest = user is None
+    used = 0 if not guest else store.trial_practices(visitor_id(request))
+    runs_today = 0 if not guest else store.count_reps_since(guest_sub(request), _hk_day_start())
+    trial_ok = not mode or used == 0
+    daily_ok = not guest or runs_today < GUEST_DAILY_RUNS
     return {
         "trial_mode": mode,
-        "signed_in": user is not None,
+        "signed_in": not guest,
         "used": used,
-        "allowed": (not mode) or user is not None or used == 0,
-        "notice": TRIAL_SIGNIN_COPY,
+        "daily_limit": GUEST_DAILY_RUNS,
+        "runs_today": runs_today,
+        "runs_left": max(0, GUEST_DAILY_RUNS - runs_today) if guest else None,
+        "allowed": (not guest) or (trial_ok and daily_ok),
+        "notice": TRIAL_SIGNIN_COPY if (guest and not trial_ok) else GUEST_LIMIT_COPY if guest else "",
+        "daily_notice": GUEST_LIMIT_COPY,
     }
 
 
@@ -1238,6 +1459,33 @@ def admin_stats(
     stats["model"] = DEEPSEEK_MODEL
     stats["generated_at"] = datetime.now(timezone.utc).isoformat()
     return stats
+
+
+@app.get("/api/admin/traffic")
+def admin_traffic(
+    request: Request,
+    days: int = 7,
+    limit: int = 100,
+    offset: int = 0,
+    q: str | None = None,
+) -> dict[str, Any]:
+    """Admin only: the raw arrival log behind the traffic panel.
+
+    One row per page load — the address, the resolved location, the device the
+    browser reported, and which route was opened. This is the one admin endpoint
+    that returns per-visitor detail rather than aggregates, which is why it is
+    behind require_admin and why the table is pruned to 90 days.
+    """
+    require_admin(request)
+    window = max(1, min(365, int(days or 7)))
+    end = datetime.now(HK)
+    return get_store().admin_traffic(
+        start=end - timedelta(days=window),
+        end=end,
+        limit=max(1, min(500, int(limit or 100))),
+        offset=max(0, int(offset or 0)),
+        search=q,
+    )
 
 
 @app.patch("/api/admin/reps/{rep_id}")
@@ -1671,6 +1919,14 @@ def grade_poi(payload: POIRequest, request: Request) -> dict[str, Any]:
         if trial_store.trial_mode():
             if trial_store.claim_trial(visitor_id(request), client_identifier(request)) > 1:
                 raise HTTPException(status_code=403, detail=TRIAL_SIGNIN_COPY)
+        # The everyday cap, independent of trial mode: two graded runs a day until
+        # the visitor signs in. Counted from the runs themselves in Hong Kong time,
+        # so it resets at local midnight and a client cannot talk its way past it.
+        if trial_store.count_reps_since(guest_sub(request), _hk_day_start()) >= GUEST_DAILY_RUNS:
+            raise HTTPException(
+                status_code=403,
+                detail={"message": GUEST_LIMIT_COPY, "code": "trial.daily_limit"},
+            )
     retry_after = grade_limiter.retry_after(
         user["sub"] if user else client_identifier(request)
     )

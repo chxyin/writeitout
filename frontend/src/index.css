@@ -122,10 +122,11 @@ body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none
    "darkening lens" from the reference design. White cards go cream, the blue
    page goes deep navy-slate, the accent orange stays orange.
 
-   `--night-strength` (0–100) is the pane's opacity, scaled to a maximum of 0.6
-   — the cap the reference uses, past which the page is too dark to read. At 0
-   the pane is invisible, so the slider is also an off switch and the toggle is a
-   convenience.
+   Both numbers come from the chosen colour temperature (lib/appearance.js), so
+   the pane is driven by two custom properties rather than a slider pair:
+   `--night-tint` is the blackbody colour for that kelvin and `--night-opacity`
+   is already scaled to the 0.6 cap. 6000K is daylight and sets opacity to 0,
+   which is what makes the far end of the dial "off".
 
    Multiply and not a `filter` on <html>/#root: a filtered ancestor becomes the
    containing block for every `position: fixed` overlay (the settings scrim, the
@@ -137,10 +138,12 @@ body.night-light::after {
   inset: 0;
   z-index: 2147483000;
   pointer-events: none;
-  background: hsl(var(--night-hue, 38) 100% 50%);
+  background: var(--night-tint, #ffffff);
   mix-blend-mode: multiply;
-  opacity: calc(var(--night-strength, 40) * 0.006);
-  transition: opacity 0.2s ease;
+  opacity: var(--night-opacity, 0);
+  /* No transition: the tint is only ever changed by dragging the temperature
+     slider, which already repaints every 100K, and easing each step made the
+     pane trail one stop behind the dial. Switching is a hard flip, like a lamp. */
 }
 
 /* Printing a page through the filter wastes the ink and hides the tint anyway;
@@ -412,6 +415,25 @@ body.night-light::after {
   transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 .rep-timer.is-done { background: rgba(255, 59, 48, 0.28); border-color: rgba(255, 59, 48, 0.6); color: #FFD9D6; }
+/* Stopwatch mode: the same chip, but it counts up and never runs out, so it is
+   tinted like the accent rather than going red — and the dot pulses to say it is
+   running, which a static number cannot. */
+.rep-timer.is-chrono { background: rgba(255, 149, 0, 0.22); border-color: rgba(255, 149, 0, 0.55); }
+.rep-timer.is-chrono::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  vertical-align: 1px;
+  animation: chrono-pulse 1.1s ease-in-out infinite;
+}
+@keyframes chrono-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .rep-timer.is-chrono::before { animation: none; opacity: 0.9; }
+}
 
 .toggle-container { display: flex; justify-content: center; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; }
 
@@ -1360,8 +1382,11 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   gap: 0.5rem; flex: 1 1 0; min-width: 0;
 }
 
+/* Right-aligned and 90% of its column: the picker reads as one control at the end
+   of the row rather than a full-width bar, which leaves the label its own gutter
+   and takes about a tenth off the length. The number box below follows it. */
 .splash-screen .segmented-control {
-  display: flex; flex-wrap: wrap; width: 100%;
+  display: flex; flex-wrap: wrap; width: 90%; margin-left: auto;
   background: rgba(0, 0, 0, 0.4); border-radius: 10px; padding: 3px; gap: 3px;
 }
 /* flex-basis: auto keeps each label's own width as the floor and the growth
@@ -2824,6 +2849,39 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   transition: background 0.2s ease;
 }
 
+/* The Kelvin scale under the temperature slider: candlelight on the left, the
+   lamp in the middle, daylight on the right. The gradient runs the same way the
+   slider does, so dragging left visibly heads for the orange end. */
+.setting-kelvin-scale {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.setting-kelvin-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgb(255, 68, 0) 0%,
+    rgb(255, 137, 0) 20%,
+    rgb(255, 177, 0) 40%,
+    rgb(255, 206, 25) 60%,
+    rgb(255, 228, 53) 80%,
+    #ffffff 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.setting-kelvin-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(0, 0, 0, 0.42);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Delegate filters ---------- */
 .stats-panel-count {
   font-weight: 700;
@@ -3433,4 +3491,222 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .stats-dates { justify-content: flex-start; }
 }
 
+/* ---------- Traffic panel ----------
+   The arrival log on #/admin: one row per page load. A plain table rather than
+   the delegate list's grid, because these rows are wider, are read one at a time,
+   and are the only place in the app that shows an address. */
+.traffic-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+/* The window picker is the row of small pills, not the storage panel's stacked
+   cards: this one has four short labels and lives beside a search box. */
+.traffic-window {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: 0 1 auto;
+}
+.traffic-window .stats-choice-btn {
+  flex-direction: row;
+  align-items: center;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.traffic-search {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 380px;
+}
+.traffic-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.traffic-search input::placeholder { color: rgba(255, 255, 255, 0.42); }
+.traffic-search input:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
+.traffic-search button {
+  padding: 0.4rem 0.7rem;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.traffic-search button:hover { background: rgba(255, 255, 255, 0.16); }
+.traffic-clear { color: rgba(255, 255, 255, 0.62); }
 
+.traffic-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: stretch;
+  margin: 0.9rem 0 1rem;
+}
+.traffic-hours {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1 1 260px;
+  height: 64px;
+  padding: 0 0 0 1px;
+}
+.traffic-hour {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 0;
+}
+.traffic-hour-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.35));
+}
+.traffic-tops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  flex: 1 1 340px;
+}
+.traffic-top { display: flex; flex-direction: column; gap: 0.15rem; min-width: 92px; }
+.traffic-top-title {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 0.1rem;
+}
+.traffic-top-row { display: flex; justify-content: space-between; gap: 0.6rem; font-size: 0.72rem; }
+.traffic-top-label { color: rgba(255, 255, 255, 0.82); }
+.traffic-top-count { color: rgba(255, 255, 255, 0.5); font-variant-numeric: tabular-nums; }
+.traffic-top-empty { font-size: 0.72rem; color: rgba(255, 255, 255, 0.4); }
+
+.traffic-table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.traffic-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+.traffic-table th,
+.traffic-table td {
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  white-space: nowrap;
+}
+.traffic-table th {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.22);
+  position: sticky;
+  top: 0;
+}
+.traffic-table tbody tr:hover { background: rgba(255, 255, 255, 0.05); }
+.traffic-table tr.is-bot { opacity: 0.55; }
+.traffic-mono { font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.78); }
+.traffic-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 5px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+}
+.traffic-tag.is-bot { color: #FFB4AC; background: rgba(255, 59, 48, 0.18); }
+.traffic-empty { padding: 1rem; text-align: center; color: rgba(255, 255, 255, 0.45); }
+
+.traffic-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+.traffic-pager span { margin-right: auto; font-variant-numeric: tabular-nums; }
+.traffic-pager button {
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.traffic-pager button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.traffic-pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ---------- Rotating hints ----------
+   One tip at the foot of the start screen, replaced every HINT_INTERVAL_MS
+   (7000ms in lib/hints.js — the animation below must keep step with it). The
+   whole line re-keys on change, so this animation is the fade in and the fade out
+   in one pass rather than something JavaScript has to schedule.
+
+   pointer-events: none, because a tip about the Play button must never sit between
+   the cursor and the Play button. */
+.hint-strip {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 60;
+  pointer-events: none;
+  max-width: min(720px, 92vw);
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+}
+.hint-line { display: inline-block; animation: hint-fade 7s ease-in-out both; }
+@keyframes hint-fade {
+  0% { opacity: 0; transform: translateY(4px); }
+  6% { opacity: 1; transform: translateY(0); }
+  90% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+@media (max-width: 640px) {
+  .hint-strip { bottom: 6px; font-size: 0.66rem; padding: 0.35rem 0.7rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint-line { animation: none; opacity: 1; transform: none; }
+}

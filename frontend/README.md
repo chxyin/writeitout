@@ -70,29 +70,41 @@ a 404.
 ## Night light
 
 Every screen sits under a warm **darkening lens**, on by default — a fixed pane
-(`body.night-light::after`) in `src/index.css` filled with the amber
-`hsl(var(--night-hue) 100% 50%)` and set to `mix-blend-mode: multiply`. White
-cards go cream, the blue page goes deep navy-slate, the accent orange stays
-orange. This is the recipe from the reference design, and the multiply is the
-whole effect: it cannot brighten, so the page dims as it warms.
+(`body.night-light::after`) in `src/index.css`, `mix-blend-mode: multiply`, whose
+colour and opacity are both derived from one number: a colour temperature.
 
-**Settings → General → Night light** turns it off; while it is on there are two
-dials:
+**Settings → General → Night light** is a switch plus a dial from **1000K to
+6000K** (default 3400K, a warm bulb). 6000K is daylight, so the lens does
+nothing and the pane is not drawn at all. 3000K is a lamp; 1000K is candlelight.
+Warmer always means dimmer, because the one dial feeds both numbers:
 
-- **Strength** (0–100%, default 55) is the pane's `opacity`, scaled to a cap of
-  **0.6** at 100 — past that the page is too dark to read. At 0 the pane is
-  invisible, so the slider is also an off switch.
-- **Warmth** picks the hue: 20° orange, 38° the reference amber (the default),
-  60° lemon. It only matters as the strength climbs.
+- **tint** is the blackbody colour for that temperature (`kelvinToRgb` in
+  `src/lib/appearance.js`, Tanner Helland's approximation) — the colour a real
+  object at that temperature glows;
+- **opacity** runs 0 at 6000K to the **0.6** cap at 1000K, past which the page is
+  too dark to read.
+
+A true blackbody tint, not a fade from white to orange, is what makes this work
+on a blue page: a fade still carries blue until the bottom of the range (it is
+`rgb(255, 132, 102)` at 3000K), and multiplying a blue page by a tint that still
+has blue in it leaves the page blue. A blackbody tint has no blue left below
+~3200K.
+
+The switch is a shortcut for the ends of its own dial: off parks the temperature
+at 6000K after remembering the warmth, on comes back to it. The temperature row
+stays on screen at 6000K — hiding it the moment the dial reached daylight would
+snatch the slider out from under the cursor mid-drag.
 
 The preference is per browser, in the same localStorage entry as the other
-settings (`nightLight`, `nightLightStrength`, `nightHue`), and nothing about it
-reaches the server.
+settings (`nightKelvin`, plus `nightLastWarm` for the switch's memory), and
+nothing about it reaches the server. A save from the old two-dial version
+(`nightLight` + `nightLightStrength`) is migrated on load: 55% becomes 3300K and
+an old "off" becomes 6000K.
 
 Two details worth keeping:
 
-- `--night-strength` and `--night-hue` are written on `<html>` and read by the
-  pane, so dragging a slider repaints without re-running the body-class effect.
+- `--night-tint` and `--night-opacity` are written on `<html>` and read by the
+  pane, so dragging the dial repaints without re-running the body-class effect.
 - The pane is a pseudo-element, not a `filter` on `<html>`/`#root`: a filtered
   ancestor becomes the containing block for every `position: fixed` overlay (the
   settings scrim, the delegate drawer, the trial gate), and those would scroll
@@ -100,6 +112,12 @@ Two details worth keeping:
 
 A `backdrop-filter: sepia(...)` version was tried first and rejected: it turns a
 blue page brown rather than dimming it, which is not what the reference does.
+
+One limit worth knowing: multiply can only darken, so the saturated blue page
+goes deep navy-slate rather than orange — no multiply can raise a channel the
+page never had. White and near-white surfaces (the cards, the settings panel) do
+go cream. Making the page itself amber would take a different blend mode
+(`color` or `hue`) or repainting the background, not a stronger multiply.
 
 ## Developer statistics
 
@@ -290,28 +308,88 @@ errors** (`delegates.flag_banned`, `PATCH /api/admin/users/{sub}`). It exists fo
 the delegate who flags every run for fun, which is noise in the list rather than
 a signal.
 
-## Trial mode
+## Anonymous limits
 
-A switch on `#/admin` (beside the storage policy) that limits visitors without an
-account to **one practice**, then asks them to sign in.
+Two rules stack, and both end the same way: a card asking for the Google sign-in.
+
+- **Two runs a day, always.** A visitor who has not signed in gets two graded runs
+  per Hong Kong day, counted from `reps` for the address-derived identity rather
+  than from a counter, so it cannot drift out of step with what was practised. It
+  resets at midnight. This is not a switch: it is the everyday limit, and signing
+  in removes it entirely.
+- **Trial mode, optional.** A switch on `#/admin` (beside the storage policy) that
+  additionally limits a visitor without an account to **one practice ever**.
 
 - The id is a cookie this page sets for itself (`writeitout_visitor`, a year,
   `SameSite=Lax`) and sends as `X-Visitor`, because the API is on another origin
   and a cookie it set would be third-party and dropped. The address is stored
   beside it in `trial_visits`; a browser with no cookie at all is counted by a
   hash of its address instead, so the gate still exists.
-- The gate is enforced in `POST /api/grade`, not in the browser: a second
-  anonymous practice is a 403 carrying the explanation. Signed-in delegates are
-  never limited, and turning the switch off restores anonymous practice at once.
+- Both gates are enforced in `POST /api/grade`, not in the browser: a refused run
+  is a 403 carrying the explanation, and for the daily cap a
+  `trial.daily_limit` code the page turns into the sign-in card. Signed-in
+  delegates are never limited. The check sits before the model call, so a capped
+  visitor costs nothing.
+- `GET /api/trial` reports `runs_today`, `runs_left` and `daily_limit`, and the
+  page refetches it after every graded run, so the start screen's note and the
+  Play button agree with the server without a reload.
 - The card's wording lives in `TRIAL_SIGNIN_COPY` on the server, so the API and
   the page cannot drift apart.
 
+## The traffic log
+
+`#/admin` ends with **Who arrives**: one row per page load, signed in or not, because
+most arrivals never sign in and the delegate table cannot see them.
+
+- `POST /api/traffic` is called once per page load from `src/lib/traffic.js`, before
+  any auth decision, and never blocks anything the visitor sees (`keepalive`, errors
+  swallowed).
+- The server adds what only it can know: the address (`x-forwarded-for`), the
+  resolved location from the platform's edge headers (`x-vercel-ip-country`,
+  `-region`, `-city`, `-latitude`, `-longitude`, `-timezone`, `-asn`), and a
+  browser/OS/device label plus a bot flag from the user agent. No third-party
+  geolocation lookup is involved.
+- The browser volunteers the rest: screen and viewport size, device pixel ratio,
+  platform, CPU cores, device memory, touch support, connection type, language,
+  timezone offset, standalone/PWA mode, whether cookies are on, the WebGL renderer,
+  and a digest of the stable parts (`fingerprint`) so a returning device is
+  recognisable across visits.
+- `GET /api/admin/traffic` is admin-only and paginated (`days`, `limit`, `offset`,
+  `q`), and returns the counts above the table: visits, distinct devices, distinct
+  addresses, first-time visitors, the signed-in share and bots, plus top countries,
+  devices and routes and a by-hour strip.
+- Rows are pruned to **90 days** (`TRAFFIC_RETENTION_DAYS`), one insert in twenty
+  doing the delete, because this app has no scheduler.
+
+## Hints
+
+The start screen carries one rotating tip, `src/components/HintsStrip.jsx` over
+`src/lib/hints.js`. The list is ordered, not shuffled: the first half is the
+Formatting tab, because "it looks wrong on my screen" is the complaint a delegate
+can fix themselves. The rotation is state, the fade is a CSS animation keyed on the
+line, and the last tip is that the tips can be turned off — **Settings → General →
+Show hints**.
+
+## The rep timer, including Chrono
+
+The timer segment is either a number of seconds (a countdown, `0` meaning no clock)
+or **Chrono**: a stopwatch that counts up, never expires and never submits for you.
+`src/lib/timer.js` is the single place that knows the difference, so the countdown,
+the auto-submit effect and the session row all treat it as "no countdown" without
+special cases.
+
+Chrono is not a special case in the data either: `write_ms` is recorded on every run
+from the moment the speech appeared, and that is exactly what the stopwatch shows.
+A chrono session records `seconds_per_rep = 0`.
+
 ## Privacy
 
-The one place a raw address is kept is `user_ips`, written when a delegate signs
-in and when they press Play: one row per (account, address) with a request count
-and first/last seen, never per run. Everything else stores only a salted hash
-(`events.ip_hash`). It exists so the developer view can tie an account to the
+
+Two tables keep a raw address. `user_ips` is written when a delegate signs in and
+when they press Play: one row per (account, address) with a request count and
+first/last seen, never per run. `traffic` keeps the address beside each page load,
+plus what the device reported, for 90 days, and only `GET /api/admin/traffic`
+serves it. Everything else stores only a salted hash (`events.ip_hash`). It exists so the developer view can tie an account to the
 network it practised from, and the list is served only by the admin endpoint.
 
 ## Scripts

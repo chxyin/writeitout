@@ -1,15 +1,18 @@
 /**
- * The sign-in gate trial mode puts in front of a second practice.
+ * The sign-in gate the anonymous caps put in front of the practice after the last
+ * free run — whether that is the admin trial switch or the two-a-day limit.
  *
  * It has to say plainly why the sign-in exists, because the honest answer —
  * "because we are counting users for a school project" — is also the one that
- * makes a stranger willing to sign in with Google.
+ * makes a stranger willing to sign in with Google. The heading comes from the
+ * caller, because "one practice, then sign in" is wrong for the daily cap.
  */
 
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 
 export default function TrialGate({
+  title = 'Sign in to keep practising',
   notice,
   onSignIn,
   onDismiss,
@@ -28,7 +31,7 @@ export default function TrialGate({
   return (
     <div className="trial-backdrop" role="dialog" aria-modal="true" aria-labelledby="trial-title">
       <div className="glass-card trial-gate">
-        <h2 className="card-title" id="trial-title">One practice, then sign in</h2>
+        <h2 className="card-title" id="trial-title">{title}</h2>
         <p className="trial-copy">{notice}</p>
 
         {GOOGLE_CLIENT_ID && onSignIn ? (

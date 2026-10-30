@@ -186,6 +186,63 @@ create table if not exists daily_metrics (
   updated_at          timestamptz not null default now()
 );
 
+-- Every arrival at the page, signed in or not: the raw log behind the traffic
+-- panel on #/admin. One row per page load, written by POST /api/traffic.
+--
+-- `ip` is the address the request came from and `visitor` is the first-party id
+-- the browser keeps in its own cookie, because those two together are what say
+-- "the same phone came back". Everything else is what the browser will volunteer
+-- about itself: screen, GPU string, language, connection, cores. `fingerprint` is
+-- a digest of the parts that survive a private window; `ua_hash` is the coarser
+-- browser-and-version digest the older analytics already used.
+--
+-- The geo columns come from the platform's edge headers (Vercel sends country,
+-- region, city, latitude, longitude, timezone and ASN on every request), so no
+-- third-party lookup is involved.
+create table if not exists traffic (
+  id            bigserial primary key,
+  at            timestamptz not null default now(),
+  ip            text,
+  visitor       text,
+  user_sub      text,
+  country       text,
+  region        text,
+  city          text,
+  latitude      double precision,
+  longitude     double precision,
+  timezone      text,
+  asn           text,
+  route         text,
+  referrer      text,
+  host          text,
+  user_agent    text,
+  browser       text,
+  os            text,
+  device        text,
+  language      text,
+  languages     text,
+  screen        text,
+  viewport      text,
+  dpr           text,
+  platform      text,
+  cores         integer,
+  memory        text,
+  touch         boolean,
+  connection    text,
+  gpu           text,
+  cookies       boolean,
+  standalone    boolean,
+  local_time    text,
+  app_version   text,
+  bot           boolean not null default false,
+  fingerprint   text,
+  ua_hash       text
+);
+create index if not exists traffic_at_idx on traffic (at desc);
+create index if not exists traffic_ip_idx on traffic (ip, at desc);
+create index if not exists traffic_visitor_idx on traffic (visitor, at desc);
+create index if not exists traffic_fingerprint_idx on traffic (fingerprint);
+
 create index if not exists reps_user_created_idx on reps (user_sub, created_at desc);
 create index if not exists reps_session_idx on reps (session_id);
 create index if not exists reps_created_idx on reps (created_at desc);

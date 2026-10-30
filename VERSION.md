@@ -1,5 +1,27 @@
 # Versions
 
+## Version 1.6 - Kelvin Night Light, the Traffic Log and the Stopwatch
+
+- **Night light, rebuilt on the Kelvin scale.** One dial instead of two: 6000K is
+  daylight and therefore off, 3000K a warm bulb, 1000K candlelight. The tint is a
+  real blackbody colour, so the blue page actually loses its blue, and the opacity
+  runs 0 to the same 0.6 cap. The switch is a shortcut to the ends of the dial and
+  remembers the warmth it left. Saves from the two-dial version are migrated.
+- **Who arrives: a traffic log.** Every page load, signed in or not, with the
+  address, the location the edge resolved, the device the browser reported (screen,
+  GPU, cores, memory, connection, language) and a device digest, in a new admin
+  panel with counts, top countries/devices/routes, a by-hour strip, search and
+  paging. Kept 90 days, admin-only.
+- **Rotating hints** on the start screen, weighted towards the Formatting tab, with
+  **Show hints** in Settings — and a tip that says so.
+- **Two runs a day without signing in.** Counted from the runs themselves per Hong
+  Kong day, enforced before the model call, lifted entirely by signing in. Trial
+  mode still stacks on top as an optional one-practice limit.
+- **Chrono**, the timer that only counts up: no deadline, no auto-submit, and the
+  elapsed time recorded per run exactly as the countdown records it. It replaces
+  the 15s segment.
+- The Runs/Timer picker is right-aligned and about a tenth shorter.
+
 ## Version 1.5 - Flagged Runs
 
 - **⚑ Flag AI error** on the feedback card: a delegate marks a run the chair got

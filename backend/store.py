@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import threading
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -47,6 +49,111 @@ GUEST_PREFIX = "anon:"
 def is_guest(sub: str | None) -> bool:
     """True for the address-derived identities that stand in for anonymous users."""
     return str(sub or "").startswith(GUEST_PREFIX)
+
+
+# How long the raw traffic log is kept. It exists to answer "who is arriving, on
+# what, and are they new" for the current fortnight; a year of it would be a
+# liability with no reader. Pruned opportunistically on insert, not by a cron.
+TRAFFIC_RETENTION_DAYS = 90
+
+# The columns POST /api/traffic fills. Kept in one place so the insert and the
+# reader cannot disagree about the shape.
+TRAFFIC_COLUMNS = (
+    "ip",
+    "visitor",
+    "user_sub",
+    "country",
+    "region",
+    "city",
+    "latitude",
+    "longitude",
+    "timezone",
+    "asn",
+    "route",
+    "referrer",
+    "host",
+    "user_agent",
+    "browser",
+    "os",
+    "device",
+    "language",
+    "languages",
+    "screen",
+    "viewport",
+    "dpr",
+    "platform",
+    "cores",
+    "memory",
+    "touch",
+    "connection",
+    "gpu",
+    "cookies",
+    "standalone",
+    "local_time",
+    "app_version",
+    "bot",
+    "fingerprint",
+    "ua_hash",
+)
+
+
+def _traffic_stamp(value: Any) -> Any:
+    """A datetime as the ISO string the browser will parse, or the value as is."""
+    if isinstance(value, datetime):
+        return value.astimezone(HK).isoformat()
+    return value
+
+
+def _traffic_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "visits": len(rows),
+        "unique_ips": len({r.get("ip") for r in rows if r.get("ip")}),
+        "unique_visitors": len({r.get("visitor") for r in rows if r.get("visitor")}),
+        "unique_devices": len({r.get("fingerprint") for r in rows if r.get("fingerprint")}),
+        "signed_in": sum(1 for r in rows if r.get("user_sub")),
+        "bots": sum(1 for r in rows if r.get("bot")),
+    }
+
+
+def _traffic_top(rows: list[dict[str, Any]], key: str, limit: int = 8) -> list[dict[str, Any]]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts[str(row.get(key) or "—")] += 1
+    return [{"label": label, "count": count} for label, count in counts.most_common(limit)]
+
+
+def _traffic_hours(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Arrivals by local hour, so the panel can show when people turn up."""
+    counts = [0] * 24
+    for row in rows:
+        at = row.get("at")
+        if isinstance(at, datetime):
+            counts[at.astimezone(HK).hour] += 1
+    return [{"hour": hour, "count": counts[hour]} for hour in range(24)]
+
+
+def _traffic_search(rows: list[dict[str, Any]], needle: str | None) -> list[dict[str, Any]]:
+    if not needle:
+        return rows
+    text = needle.strip().lower()
+    if not text:
+        return rows
+    fields = (
+        "ip",
+        "visitor",
+        "user_sub",
+        "city",
+        "country",
+        "region",
+        "browser",
+        "os",
+        "device",
+        "route",
+        "referrer",
+        "user_agent",
+        "asn",
+    )
+    return [row for row in rows if any(text in str(row.get(f) or "").lower() for f in fields)]
 
 
 class StatsError(RuntimeError):
@@ -203,6 +310,15 @@ class Store:
     ) -> None:
         raise NotImplementedError
 
+    def count_reps_since(self, sub: str, since: datetime) -> int:
+        """How many runs this identity has recorded since a moment.
+
+        Only the anonymous daily cap uses this: a guest gets two graded runs a day,
+        counted from the runs themselves rather than from a counter that could
+        drift out of step with what is actually in the table.
+        """
+        raise NotImplementedError
+
     def list_sessions(self, sub: str, limit: int = 20) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -295,6 +411,22 @@ class Store:
     def add_events(self, sub: str | None, events: list[dict[str, Any]], ip_hash: str) -> None:
         raise NotImplementedError
 
+    def add_traffic(self, row: dict[str, Any]) -> None:
+        """One page load, as much as the browser and the edge were willing to say."""
+        raise NotImplementedError
+
+    def admin_traffic(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """The traffic log for one window, with the counts the panel shows above it."""
+        raise NotImplementedError
+
     # -- settings ----------------------------------------------------------- #
     def storage_mode(self) -> str:
         return DEFAULT_STORAGE_MODE
@@ -359,6 +491,7 @@ class MemoryStore(Store):
         self._events: list[dict[str, Any]] = []
         self._ips: dict[str, dict[str, dict[str, Any]]] = {}
         self._trials: dict[str, dict[str, Any]] = {}
+        self._traffic: list[dict[str, Any]] = []
         self._mode = DEFAULT_STORAGE_MODE
         self._trial = False
 
@@ -520,6 +653,14 @@ class MemoryStore(Store):
                     delegate["longest_streak"], delegate["streak_days"]
                 )
                 delegate["last_practice_on"] = today
+
+    def count_reps_since(self, sub: str, since: datetime) -> int:
+        with self._lock:
+            return sum(
+                1
+                for rep in self._reps.values()
+                if rep["user_sub"] == sub and rep["created_at"] >= since
+            )
 
     def list_sessions(self, sub: str, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
@@ -1196,6 +1337,55 @@ class MemoryStore(Store):
                     }
                 )
 
+    def add_traffic(self, row: dict[str, Any]) -> None:
+        with self._lock:
+            self._traffic.append({**row, "at": datetime.now(HK)})
+            # A long-running dev process must not grow the log without bound; the
+            # Postgres store prunes on its own schedule instead.
+            if len(self._traffic) > 2000:
+                cutoff = datetime.now(HK) - timedelta(days=TRAFFIC_RETENTION_DAYS)
+                self._traffic = [entry for entry in self._traffic if entry["at"] >= cutoff]
+
+    def admin_traffic(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            log = [dict(entry) for entry in self._traffic]
+        matched = _traffic_search([row for row in log if start <= row["at"] < end], search)
+        matched.sort(key=lambda row: row["at"], reverse=True)
+        # A visitor counts as new when this window holds their very first arrival,
+        # which needs the whole log rather than just the window's rows.
+        first_seen: dict[str, datetime] = {}
+        for entry in log:
+            visitor = entry.get("visitor")
+            if visitor and (visitor not in first_seen or entry["at"] < first_seen[visitor]):
+                first_seen[visitor] = entry["at"]
+        summary = _traffic_totals(matched)
+        summary["new_visitors"] = sum(1 for seen in first_seen.values() if start <= seen < end)
+        return {
+            "start": start,
+            "end": end,
+            "summary": summary,
+            "countries": _traffic_top(matched, "country"),
+            "devices": _traffic_top(matched, "device"),
+            "browsers": _traffic_top(matched, "browser"),
+            "routes": _traffic_top(matched, "route"),
+            "hours": _traffic_hours(matched),
+            "rows": [
+                {**row, "at": _traffic_stamp(row["at"])}
+                for row in matched[offset : offset + limit]
+            ],
+            "total": len(matched),
+            "limit": limit,
+            "offset": offset,
+        }
+
     def trial_mode(self) -> bool:
         return self._trial
 
@@ -1555,6 +1745,132 @@ class PostgresStore(Store):
                 (sub, ip),
             )
 
+    def add_traffic(self, row: dict[str, Any]) -> None:
+        placeholders = ", ".join(["%s"] * len(TRAFFIC_COLUMNS))
+        values = [row.get(column) for column in TRAFFIC_COLUMNS]
+        with self._conn() as conn:
+            conn.execute(
+                f"insert into traffic ({', '.join(TRAFFIC_COLUMNS)}) values ({placeholders})",
+                values,
+            )
+            # One insert in twenty also drops rows past the retention window. A
+            # cron would be tidier, but this app has no scheduler and a bulk
+            # delete every few dozen arrivals is invisible.
+            if random.random() < 0.05:
+                conn.execute(
+                    "delete from traffic where at < now() - make_interval(days => %s)",
+                    (TRAFFIC_RETENTION_DAYS,),
+                )
+
+    def admin_traffic(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        where = "at >= %s and at < %s"
+        params: list[Any] = [start, end]
+        needle = (search or "").strip()
+        if needle:
+            columns = (
+                "ip",
+                "visitor",
+                "user_sub",
+                "city",
+                "country",
+                "region",
+                "browser",
+                "os",
+                "device",
+                "route",
+                "referrer",
+                "user_agent",
+                "asn",
+            )
+            clauses = " or ".join(f"coalesce({column}, '') ilike %s" for column in columns)
+            where += f" and ({clauses})"
+            params.extend([f"%{needle}%"] * len(columns))
+
+        with self._conn() as conn:
+            totals = conn.execute(
+                f"""
+                select count(*) as visits,
+                       count(distinct ip) as unique_ips,
+                       count(distinct visitor) as unique_visitors,
+                       count(distinct fingerprint) as unique_devices,
+                       count(*) filter (where user_sub is not null) as signed_in,
+                       count(*) filter (where bot) as bots
+                from traffic where {where}
+                """,
+                params,
+            ).fetchone()
+            fresh = conn.execute(
+                """
+                select count(*) as n from (
+                    select visitor, min(at) as first_at from traffic
+                    where visitor is not null group by visitor
+                ) seen where first_at >= %s and first_at < %s
+                """,
+                (start, end),
+            ).fetchone()
+
+            def top(column: str) -> list[dict[str, Any]]:
+                rows = conn.execute(
+                    f"""
+                    select coalesce({column}, '—') as label, count(*) as count
+                    from traffic where {where}
+                    group by 1 order by count desc, label asc limit 8
+                    """,
+                    params,
+                ).fetchall()
+                return [{"label": row["label"], "count": int(row["count"])} for row in rows]
+
+            countries = top("country")
+            devices = top("device")
+            browsers = top("browser")
+            routes = top("route")
+            hour_rows = conn.execute(
+                f"""
+                select extract(hour from at + interval '8 hours')::int as hour, count(*) as count
+                from traffic where {where} group by 1
+                """,
+                params,
+            ).fetchall()
+            counted = {int(row["hour"]): int(row["count"]) for row in hour_rows}
+            page = conn.execute(
+                f"select * from traffic where {where} order by at desc limit %s offset %s",
+                [*params, limit, offset],
+            ).fetchall()
+
+        summary = {
+            "visits": int(totals["visits"] or 0),
+            "unique_ips": int(totals["unique_ips"] or 0),
+            "unique_visitors": int(totals["unique_visitors"] or 0),
+            "unique_devices": int(totals["unique_devices"] or 0),
+            "signed_in": int(totals["signed_in"] or 0),
+            "bots": int(totals["bots"] or 0),
+            "new_visitors": int(fresh["n"] or 0),
+        }
+        return {
+            "start": start,
+            "end": end,
+            "summary": summary,
+            "countries": countries,
+            "devices": devices,
+            "browsers": browsers,
+            "routes": routes,
+            "hours": [{"hour": hour, "count": counted.get(hour, 0)} for hour in range(24)],
+            "rows": [
+                {**dict(row), "at": _traffic_stamp(row["at"])} for row in page
+            ],
+            "total": int(totals["visits"] or 0),
+            "limit": limit,
+            "offset": offset,
+        }
+
     def admin_user(self, sub: str) -> dict[str, Any] | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -1681,6 +1997,14 @@ class PostgresStore(Store):
                 (banned, sub),
             ).fetchone()
         return row is not None
+
+    def count_reps_since(self, sub: str, since: datetime) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select count(*) as n from reps where user_sub = %s and created_at >= %s",
+                (sub, since),
+            ).fetchone()
+        return int(row["n"] or 0)
 
     def recount_delegate(self, sub: str) -> None:
         """Rebuild the delegate's counters from the runs that still count."""

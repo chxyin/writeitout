@@ -58,8 +58,35 @@ export async function fetchAdminStats({ rangeId = '30', from = '', to = '' } = {
   }
 }
 
-/** One delegate, everything they ever submitted, and the addresses they used. */
-export async function fetchAdminUser(sub) {
+/**
+ * The raw arrival log: one row per page load, with the address, the resolved
+ * location and the device the browser reported.
+ *
+ * Paginated and searchable on the server because this is the one table that grows
+ * with traffic rather than with delegates.
+ */
+export async function fetchTraffic({ days = 7, limit = 100, offset = 0, q = '' } = {}) {
+  const params = new URLSearchParams({
+    days: String(days),
+    limit: String(limit),
+    offset: String(offset)
+  });
+  if (q) params.set('q', q);
+  try {
+    return {
+      data: await api.get(`/api/admin/traffic?${params.toString()}`, { timeoutMs: 20_000 })
+    };
+  } catch (error) {
+    return {
+      data: null,
+      status: error && error.status ? error.status : 0,
+      code: (error && error.code) || null,
+      message: error && error.message ? error.message : 'The traffic log could not be read.'
+    };
+  }
+}
+
+/** One delegate, everything they ever submitted, and the addresses they used. */export async function fetchAdminUser(sub) {
   try {
     return { data: await api.get(`/api/admin/users/${encodeURIComponent(sub)}`, { timeoutMs: 25_000 }) };
   } catch (error) {

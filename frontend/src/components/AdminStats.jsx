@@ -20,6 +20,7 @@ import GoogleSignInButton from './GoogleSignInButton.jsx';
 import UserDrawer from './UserDrawer.jsx';
 import StatsChart from './StatsChart.jsx';
 import ExportPanel from './ExportPanel.jsx';
+import TrafficPanel from './TrafficPanel.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
 import {
   fetchAdminStats,
@@ -1145,6 +1146,8 @@ export default function AdminStats({
                     </div>
                   )}
                 </section>
+
+                <TrafficPanel delegates={delegates} />
 
                 <ExportPanel
                   delegates={delegates}
