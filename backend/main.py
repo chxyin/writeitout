@@ -1304,7 +1304,19 @@ def record_traffic(payload: TrafficPing, request: Request) -> dict[str, Any]:
         "fingerprint": fingerprint,
         "ua_hash": hashlib.sha256(user_agent.encode()).hexdigest()[:16],
     }
-    get_store().add_traffic(row)
+    try:
+        get_store().add_traffic(row)
+    except Exception as error:  # noqa: BLE001 - a logged visit must never 500
+        # Losing one row of the traffic log is cheaper than a failed page load, so
+        # a storage problem is swallowed here and reported instead of raised. The
+        # SQLSTATE rides back with the answer so a failure is visible from the
+        # browser's console rather than only in the platform's logs.
+        logger.exception("Could not record a visit at %s", row.get("route"))
+        return {
+            "ok": False,
+            "error": type(error).__name__,
+            "sqlstate": getattr(error, "sqlstate", None),
+        }
     return {"ok": True}
 
 
