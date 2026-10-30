@@ -118,33 +118,29 @@ body.low-intensity .prompt-card { backdrop-filter: none; }
 body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none; }
 
 /* ---------- Night light ----------
-   A pane over the whole app that filters whatever is painted beneath it. The
-   obvious alternative — a filter on <html> or #root — turns that element into the
-   containing block for every `position: fixed` overlay (the settings panel's
-   scrim, the delegate drawer, the trial gate), so those would scroll with the
-   page instead of pinning to the screen. A backdrop filter tints without
-   touching layout, and because it is the last thing in the document it covers
-   the drawers and the time's-up veil as well.
+   A warm pane over the whole app, multiplied into everything beneath it: the
+   "darkening lens" from the reference design. White cards go cream, the blue
+   page goes deep navy-slate, the accent orange stays orange.
 
-   Sepia is what makes the cast warm: it collapses everything towards amber, and
-   the rotation below moves that amber between orange and lemon, which is the one
-   number Settings exposes. The strength is fixed — a half-warm screen is neither
-   one thing nor the other — and the 0.05 tint on top keeps large dark areas from
-   going grey under the filter alone. */
+   `--night-strength` (0–100) is the pane's opacity, scaled to a maximum of 0.6
+   — the cap the reference uses, past which the page is too dark to read. At 0
+   the pane is invisible, so the slider is also an off switch and the toggle is a
+   convenience.
+
+   Multiply and not a `filter` on <html>/#root: a filtered ancestor becomes the
+   containing block for every `position: fixed` overlay (the settings scrim, the
+   delegate drawer, the trial gate), and those would scroll with the page
+   instead of pinning to the screen. A pseudo-element costs no layout either. */
 body.night-light::after {
   content: '';
   position: fixed;
   inset: 0;
   z-index: 2147483000;
   pointer-events: none;
-  background: hsl(var(--night-hue, 45) 100% 50% / 0.05);
-  /* Written unprefixed on purpose: the build adds the -webkit- alias itself
-     (Safari needs it), but when both are written by hand it keeps only the
-     alias — and Chrome ignores the prefixed name, so the feature vanished.
-     Strength is 0.9 rather than 1: a full sepia is a monochrome photograph,
-     and the PLAY button stops reading as a button against the pages behind it. */
-  backdrop-filter: sepia(0.9) saturate(2.5) hue-rotate(calc(var(--night-hue, 45) * 1deg - 38deg))
-    brightness(1.02);
+  background: hsl(var(--night-hue, 38) 100% 50%);
+  mix-blend-mode: multiply;
+  opacity: calc(var(--night-strength, 40) * 0.006);
+  transition: opacity 0.2s ease;
 }
 
 /* Printing a page through the filter wastes the ink and hides the tint anyway;
@@ -2175,6 +2171,236 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .stats-bar-slot:focus-visible .stats-tip { display: flex; }
 .stats-bar-slot:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 3px; }
 
+/* ---------- The chart switch ----------
+   One control for every chart on the page, so the same question is answered the
+   same way twice in a row. It sits in the toolbar beside the definitions. */
+.stats-chart-switch { display: flex; align-items: center; gap: 0.3rem; }
+.stats-chart-switch-label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.stats-chart-switch-btn {
+  padding: 0.26rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.stats-chart-switch-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.stats-chart-switch-btn.is-active {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+.stats-chart-switch-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---------- Line drawing ----------
+   The SVG stretches to the box and keeps its stroke one pixel wide; the dots are
+   HTML so their size never distorts, and they carry the same hover card as a bar. */
+.stats-chart-line { position: relative; }
+.stats-line-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.stats-line-svg polyline {
+  fill: none;
+  stroke: var(--accent-orange);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.stats-point {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: default;
+}
+.stats-point-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  box-shadow: 0 0 0 2px rgba(10, 16, 40, 0.55);
+}
+.stats-point-dot.is-empty { background: rgba(255, 255, 255, 0.25); }
+.stats-point:hover .stats-tip,
+.stats-point:focus-visible .stats-tip { display: flex; }
+.stats-point:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---------- Pie ----------
+   A donut with the total in the hole, and a legend that carries the exact
+   numbers: a slice can say "about a fifth", the legend says 47. */
+.stats-pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+.stats-pie-svg { width: 132px; height: 132px; flex: 0 0 auto; }
+.stats-pie-hole { fill: rgba(10, 16, 40, 0.55); }
+.stats-pie-total {
+  fill: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+.stats-pie-caption {
+  fill: rgba(255, 255, 255, 0.5);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stats-pie-legend {
+  flex: 1 1 180px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.stats-pie-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+}
+.stats-pie-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.stats-pie-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.78);
+}
+.stats-pie-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #fff;
+}
+.stats-pie-value em {
+  margin-left: 0.35rem;
+  font-style: normal;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ---------- Export panel ----------
+   Dense on purpose: it is a form a developer fills in once and reads top to
+   bottom, so each block is a label, its controls, and one line of explanation. */
+.stats-export .stats-panel-note { margin-bottom: 0.7rem; }
+.export-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.export-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+.export-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.45);
+}
+.export-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+.export-field input {
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.export-field.is-narrow input { width: 5rem; }
+.export-field input:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.export-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.export-picker {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0.35rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.export-pick {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.export-pick:hover { background: rgba(255, 255, 255, 0.07); }
+.export-pick input { accent-color: var(--accent-orange); width: 15px; height: 15px; margin: 0; }
+.export-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-pick-meta { font-size: 0.66rem; color: rgba(255, 255, 255, 0.45); }
+.export-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.export-download {
+  padding: 0.5rem 1.1rem;
+  font-size: 0.8rem;
+  border-radius: 10px;
+}
+.export-result {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.6);
+}
+
 /* ---------- A clickable table row (opens a delegate) ---------- */
 .stats-table-row.is-clickable {
   width: 100%;
@@ -2308,6 +2534,24 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   margin-bottom: 0.6rem;
 }
 .user-drawer-reps-head .stats-panel-title { margin: 0; }
+.user-drawer-reps-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.user-drawer-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.28);
+}
+.user-drawer-bulk-count {
+  margin-right: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+}
 .user-search {
   width: 100%;
   margin-bottom: 0.6rem;
@@ -2329,16 +2573,52 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   overflow: hidden;
 }
 .user-rep[open] { border-color: rgba(255, 255, 255, 0.22); }
+.user-rep.is-open { border-color: rgba(255, 255, 255, 0.22); }
+/* The bar: the fold toggle on the left, the two quick actions pinned right. */
 .user-rep-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem 0.45rem 0.65rem;
+}
+.user-rep-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 0.15rem 0.55rem;
-  padding: 0.5rem 0.65rem;
-  cursor: pointer;
-  list-style: none;
   align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
+.user-rep-toggle:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 8px; }
+.user-rep-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.user-rep-bar-actions .user-rep-override input { width: 3.4rem; }
 .user-rep-head::-webkit-details-marker { display: none; }
+/* Selecting adds a checkbox column in front of the score and drops the quick
+   actions: a batch is changed from the bar above the list, not row by row. */
+.user-rep.is-selectable .user-rep-head {
+  display: grid;
+  grid-template-columns: 18px 34px minmax(0, 1fr);
+}
+.user-rep.is-selectable { background: rgba(255, 255, 255, 0.03); }
+.user-rep-check {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent-orange);
+  cursor: pointer;
+}
 .user-rep-score {
   grid-row: span 2;
   display: flex;
@@ -2536,6 +2816,49 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   border-style: dashed;
   color: rgba(255, 255, 255, 0.6);
 }
+
+/* The sort row. A button reads as a choice rather than a column header (there is
+   no room for headers on a phone), and the label spells out the direction it is
+   currently in: "Last used" becomes "First used" when pressed again. */
+.stats-sorts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+.stats-sorts-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+  margin-right: 0.15rem;
+}
+.stats-sort {
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.stats-sort:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.stats-sort.is-active {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+.stats-sort:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* A guest row: same table, but it should be obvious at a glance that this is an
+   address rather than an account. */
+.stats-table-row.is-guest .stats-delegate-name { font-style: italic; }
+.stats-table-row.is-guest .stats-delegate-email { color: rgba(255, 255, 255, 0.38); }
 
 .stats-panel-title-spaced { margin-top: 1.1rem; }
 
@@ -2856,8 +3179,8 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .stats-table-head,
 .stats-table-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 52px 44px 44px;
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) 46px 40px 40px 42px;
+  gap: 0.45rem;
   align-items: center;
   padding: 0.4rem 0;
   font-size: 0.78rem;

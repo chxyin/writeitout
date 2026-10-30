@@ -69,27 +69,37 @@ a 404.
 
 ## Night light
 
-Every screen is filtered warm by default — a fixed pane (`body.night-light::after`)
-in `src/index.css` holding a `backdrop-filter: sepia(...) saturate(...)
-hue-rotate(...)`. It is a backdrop filter and not a `filter` on `<html>` on
-purpose: a filtered ancestor becomes the containing block for `position: fixed`
-descendants, which would make the settings scrim, the delegate drawer and the
-trial gate scroll with the page instead of pinning to the screen.
+Every screen sits under a warm **darkening lens**, on by default — a fixed pane
+(`body.night-light::after`) in `src/index.css` filled with the amber
+`hsl(var(--night-hue) 100% 50%)` and set to `mix-blend-mode: multiply`. White
+cards go cream, the blue page goes deep navy-slate, the accent orange stays
+orange. This is the recipe from the reference design, and the multiply is the
+whole effect: it cannot brighten, so the page dims as it warms.
 
-**Settings → General → Night light** turns it off, and while it is on, a
-**Warmth** slider picks the hue — 25° is orange, 65° is lemon, 45° is the warm
-desk-lamp default. The preference is per browser, in the same localStorage entry
-as the other settings (`nightLight`, `nightHue`), and nothing about it reaches the
-server.
+**Settings → General → Night light** turns it off; while it is on there are two
+dials:
+
+- **Strength** (0–100%, default 55) is the pane's `opacity`, scaled to a cap of
+  **0.6** at 100 — past that the page is too dark to read. At 0 the pane is
+  invisible, so the slider is also an off switch.
+- **Warmth** picks the hue: 20° orange, 38° the reference amber (the default),
+  60° lemon. It only matters as the strength climbs.
+
+The preference is per browser, in the same localStorage entry as the other
+settings (`nightLight`, `nightLightStrength`, `nightHue`), and nothing about it
+reaches the server.
 
 Two details worth keeping:
 
-- The custom property `--night-hue` is written on `<html>` and read by the filter,
-  so dragging the slider repaints without re-running the body-class effect.
-- **Write only the unprefixed `backdrop-filter`.** Lightning CSS adds the
-  `-webkit-` alias for Safari by itself; when both are written by hand it keeps
-  the alias *only*, and Chrome ignores the prefixed name, so the whole feature
-  silently disappears.
+- `--night-strength` and `--night-hue` are written on `<html>` and read by the
+  pane, so dragging a slider repaints without re-running the body-class effect.
+- The pane is a pseudo-element, not a `filter` on `<html>`/`#root`: a filtered
+  ancestor becomes the containing block for every `position: fixed` overlay (the
+  settings scrim, the delegate drawer, the trial gate), and those would scroll
+  with the page instead of pinning to the screen.
+
+A `backdrop-filter: sepia(...)` version was tried first and rejected: it turns a
+blue page brown rather than dimming it, which is not what the reference does.
 
 ## Developer statistics
 
@@ -173,18 +183,94 @@ counts as neither, because no answer is not a no.
 
 ### Overwriting a run
 
-God Mode is not read-only. Each run carries three developer actions:
+God Mode is not read-only. Every run's bar carries the two things a developer
+does most often, so neither needs the card opened:
 
 - **Score** — type a new mark and leave the box; `PATCH /api/admin/reps/{id}`
   replaces the chair's number.
-- **Exclude from stats** — `reps.excluded`. The run stays in the list, greyed and
+- **Exclude / Include** — `reps.excluded`. The run stays in the list, greyed and
   tagged, so it can be put back, but every aggregate (counts, average, spread,
   topics, spend, clock use) ignores it. The delegate's own counters are rebuilt
   from the runs that still count, so the two can never disagree.
-- **Delete** — `DELETE /api/admin/reps/{id}`, permanent, and it asks first.
+- **Delete this run** (inside the card) — `DELETE /api/admin/reps/{id}`,
+  permanent, and it asks first.
+
+**Select** at the top of the list turns every row into a checkbox with a bar
+above it — *Exclude selected*, *Include again*, *Select all* — because tidying a
+batch of test runs one card at a time is the chore that stops people tidying.
+The tick list only covers the rows the topic filter is showing.
 
 Session-level numbers (runs per sitting, finish rate) still include a session
 whose runs were excluded: those describe the sitting, not the marked answers.
+
+### Delegates, sorting, and the anonymous
+
+The delegate table is sortable with four buttons: **Last used / First used**,
+**Highest / Lowest average**, **Most / Least time**, **Most / Fewest runs**.
+Pressing the active button again flips the direction and the label flips with it,
+so the button always says which end is on top. Time on app is the visible-minute
+heartbeat count for that account, the same number the drawer shows.
+
+Two more columns than before:
+
+- **Excl.** — how many of that delegate's runs are hidden from the figures. The
+  count is shown beside the run total, not subtracted from it, so "9 runs, 2
+  hidden" is readable at a glance.
+- **Anonymous rows.** A visitor who never signs in still practises, and that
+  practice is recorded under an address-derived key (`anon:<hash>`, see
+  `guest_sub()` in `backend/main.py`) with the address itself in `user_ips`. The
+  table shows them as **Anonymous 203.0.113.24** rather than hiding them, and
+  clicking one opens the same drawer. They are *not* counted as delegates in the
+  sign-up, retention or cohort numbers — those are about accounts — so the
+  Delegates card carries a "N anonymous visitors" note instead.
+
+Guest runs never store text, whatever the deployment's answer policy says: there
+is no account to hang consent on, so the mark is kept and the writing is not.
+God Mode shows "not stored" for them, which is the truth rather than a bug.
+
+### Charts: bars, pie or graph
+
+**Charts** in the toolbar switches every graph on the page at once — runs per
+day, marks per band, runs per sitting and the topic split:
+
+- **Bars** — the default; hover (or tab to) a bar for that day in full.
+- **Graph** — a line with a point per day; the same hover card, the trend is the
+  point.
+- **Pie** — a donut with a legend carrying exact counts and shares. A long series
+  is grouped into at most eight slices (a 30-day window becomes five-day
+  blocks and the legend says which days each slice covers), because thirty
+  hairline wedges is not a chart.
+
+Topics keep their row list under Bars — a topic name is too long for an axis —
+and switch to the pie or line when the toolbar does.
+
+## Export runs
+
+The **Export runs** panel turns the database into a training file. Every control
+is a question someone assembling a fine-tuning set asks:
+
+- **From / To** — a window, defaulting to the ranged window above; *Use the
+  window above* re-syncs it.
+- **Marks** — preset bands (7–10, 4–6, 1–3, 2–4, 8–10) plus *From mark / To
+  mark* for a custom one. Several bands can be active at once and are OR-ed:
+  ticking 7–10 and 1–3 exports the best and the worst in one file.
+- **Whose runs** — Everyone, Only ticked, or Everyone except ticked, with a
+  searchable checklist and *Tick all shown*.
+- **Fields** — what goes in the file: when, speech, their POI, score, the chair's
+  label/reasoning/advice, the model rewrite, topic, committee, delegation,
+  account id, writing time, tokens, the excluded flag.
+- **Options** — only runs whose answers were stored (on by default), include
+  excluded runs, oldest first, and drop duplicate (speech, answer) pairs.
+- **Format** — JSON (one indented array), JSONL (one object per line), Chat (the
+  `messages` shape for fine-tuning a POI writer), CSV, TSV, or plain Text.
+- **Preview count** runs the same query and reports the run count and file size
+  without downloading anything.
+
+`POST /api/admin/export` builds the file server-side and hands back its text; the
+browser saves it as a Blob, so no export is stored on the server and none is
+mailed anywhere. The response is capped at 5,000 rows (the store accepts up to
+20,000) — well under the function's body limit, and a training set bigger than
+that wants to be built in date slices anyway.
 
 ## Trial mode
 

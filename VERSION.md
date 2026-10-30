@@ -1,5 +1,32 @@
 # Versions
 
+## Version 1.4 - Charts, Anonymous Visitors and a Training Export
+
+Builds on v1.3. The developer view becomes something you can read three ways and
+take data out of.
+
+- **Night light, rebuilt to the reference.** A multiplied amber pane over every
+  screen, adjustable from 0 to 100% (capped at 0.6 opacity) with a hue dial;
+  on by default. No more sepia cast.
+- **Anonymous practice is recorded.** A visitor who never signs in practises
+  under an address-derived key and appears in the delegate table as
+  **Anonymous 203.0.113.24**. Guests never have answer text stored, whatever the
+  deployment's answer policy says. They are counted separately from signed-in
+  delegates, so the sign-up and retention numbers still mean accounts.
+- **Every chart can be bars, pie or graph.** One switch in the toolbar redraws
+  runs per day, marks per band, runs per sitting and the topic split. A long
+  series is grouped into at most eight pie slices.
+- **The delegate table is sortable** — last/first used, highest/lowest average,
+  most/least time, most/fewest runs — with a new **Excl.** column counting the
+  runs hidden from the figures.
+- **God Mode can act on several runs at once.** *Select* turns the list into
+  checkboxes with Exclude / Include actions, and the score box and Exclude button
+  moved onto the run's own bar.
+- **Export runs.** An admin panel that builds a training file from the runs
+  themselves: date window, one or more mark bands, include/exclude delegates,
+  field picker, and JSON / JSONL / Chat / CSV / TSV / Text output, with a preview
+  count before downloading.
+
 ## Version 1.3 - Night Light and Self-Describing Failures
 
 Builds on v1.2. The page ships warm, the developer view explains its own

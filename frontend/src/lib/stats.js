@@ -133,6 +133,24 @@ function download(filename, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * Build a training export. The server returns the file's text (or, for a dry
+ * run, just its size), so nothing has to be kept anywhere between the request
+ * and the save.
+ */
+export async function exportRuns(body) {
+  try {
+    return { ok: true, data: await api.post('/api/admin/export', body, { timeoutMs: 60_000 }) };
+  } catch (error) {
+    return {
+      ok: false,
+      status: error && error.status ? error.status : 0,
+      code: (error && error.code) || null,
+      message: (error && error.message) || 'The export could not be built.'
+    };
+  }
+}
+
 /** The dashboard's own table, as a spreadsheet. */
 export function downloadSummaryCsv(delegates, stamp) {
   download(

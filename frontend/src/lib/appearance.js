@@ -25,14 +25,14 @@ export const BACKGROUND_IDS = BACKGROUNDS.map((option) => option.id);
 /**
  * Night light: the warm cast that sits over every screen.
  *
- * The filter itself lives in index.css; this is only the dial for it. The hue is
- * a real hue angle, so the slider runs from orange (25°) through amber to a
- * lemon yellow (65°). 45° is the colour of a warm desk lamp, which is the
- * default: the feature is on unless it is turned off, on the theory that
- * somebody practising at midnight wants the warm screen before they know to ask
- * for it.
+ * Two dials only. `strength` is how strong the cast is — 0 is off, 100 is the
+ * most the filter will ever do (the CSS caps it at 60% opacity, because a full
+ * multiply over a dark page is mud). `hue` is the colour of the warmth: 25° is
+ * orange, 45° a warm desk lamp, 65° lemon.
  */
-export const NIGHT_HUE_RANGE = { min: 25, max: 65, step: 1, default: 45 };
+export const NIGHT_STRENGTH_RANGE = { min: 0, max: 100, step: 5, default: 55 };
+
+export const NIGHT_HUE_RANGE = { min: 20, max: 60, step: 1, default: 38 };
 
 /** The yellow whose hue is the chosen angle — used for the swatch in Settings. */
 export function nightTint(hue) {

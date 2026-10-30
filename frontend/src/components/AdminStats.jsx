@@ -18,6 +18,8 @@ import { useEffect, useState } from 'react';
 import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import UserDrawer from './UserDrawer.jsx';
+import StatsChart from './StatsChart.jsx';
+import ExportPanel from './ExportPanel.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
 import {
   fetchAdminStats,
@@ -79,6 +81,20 @@ function formatDay(iso) {
   return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+/**
+ * The last day *inside* the window. The API's window is half-open, so a range
+ * ending on 1 Nov has 31 Oct as its last real day — which is the date a picker
+ * should show.
+ */
+function inclusiveDay(iso) {
+  if (!iso || iso.length < 10) return '';
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function formatWhen(iso) {
   if (!iso) return '';
   const date = new Date(iso);
@@ -128,6 +144,49 @@ const STORAGE_CHOICES = [
 // ticking several narrows the list — they are read as AND, which is what a
 // checkbox row implies.
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+// The delegate table's sort buttons. Each one is a pair of labels rather than a
+// fixed title: pressing it again flips the direction, and the button says which
+// way it is now pointing ("Last used" / "First used") instead of showing an
+// arrow nobody reads twice.
+const DELEGATE_SORTS = [
+  { id: 'last', label: 'Last used', flipped: 'First used' },
+  { id: 'average', label: 'Highest average', flipped: 'Lowest average' },
+  { id: 'time', label: 'Most time', flipped: 'Least time' },
+  { id: 'runs', label: 'Most runs', flipped: 'Fewest runs' }
+];
+
+/** A guest has no account: its key starts with `anon:` and the address is the name. */
+function isAnonymous(row) {
+  return Boolean(row && (row.guest || String(row.sub || '').startsWith('anon:')));
+}
+
+/** What to call a delegate in a list — an account's name, or an address. */
+function delegateName(row) {
+  if (isAnonymous(row)) return row.ip ? `Anonymous ${row.ip}` : 'Anonymous';
+  return row.name || row.email || 'Delegate';
+}
+
+/** The second line under a name: the address, or the guest's standing. */
+function delegateHandle(row) {
+  if (isAnonymous(row)) return 'not signed in';
+  return row.email || '';
+}
+
+/** The sort value for one row, as a number a comparator can use. */
+function sortValue(row, id) {
+  if (id === 'last') {
+    // Day granularity, not timestamps: an account with no practice day falls back
+    // to when it was last seen, and a 18:26 heartbeat must not outrank a practice
+    // that happened earlier the same day.
+    const stamp = row.last_practice_on || row.last_seen_at || '';
+    const parsed = Date.parse(`${String(stamp).slice(0, 10)}T00:00:00`);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (id === 'average') return row.average_score === null ? -1 : row.average_score;
+  if (id === 'time') return row.active_seconds || 0;
+  return row.reps || 0;
+}
 
 const DELEGATE_FILTERS = [
   { id: 'practised', label: 'Has practised', test: (row) => row.reps > 0 },
@@ -182,6 +241,14 @@ export default function AdminStats({
   // the window chooses the numbers, the ticks choose the rows.
   const [rowsFilter, setRowsFilter] = useState([]);
   const [rowSearch, setRowSearch] = useState('');
+  // Which column the delegate table is sorted by, and which way. Pressing the
+  // active button again flips the direction; pressing another one starts it at
+  // "biggest / newest first", which is the order people look for first.
+  const [sort, setSort] = useState({ id: 'runs', desc: true });
+  // Every chart on the page draws from its own series; this picks the drawing.
+  // One switch for all of them, because comparing a bar panel with a pie panel
+  // is not a thing anyone wants to do.
+  const [chartType, setChartType] = useState('bars');
   const [infoOpen, setInfoOpen] = useState(false);
   const [reload, setReload] = useState(0);
   // One object for the fetch, keyed by the request it belongs to. Nothing has to
@@ -301,18 +368,60 @@ export default function AdminStats({
   // Both charts scale to their own busiest bar, so a quiet week still shows its
   // shape instead of a flat line along the floor.
   const busiestDay = Math.max(1, ...daily.map((day) => day.reps));
-  const busiestScore = Math.max(1, ...scores.map((row) => row.reps));
-  const busiestDropoff = Math.max(1, ...((habits && habits.dropoff) || []).map((row) => row.sessions));
+
+  // The three chart panels, as series the chart component can draw any way.
+  const daySeries = daily.map((day) => ({
+    key: day.day,
+    label: formatDay(day.day),
+    value: day.reps,
+    tip: [
+      formatDay(day.day),
+      `${formatCount(day.reps)} ${day.reps === 1 ? 'run' : 'runs'}`,
+      `${formatCount(day.active_users)} active · ${formatMoney(day.cost_usd)}`
+    ]
+  }));
+
+  const dropoffSeries = ((habits && habits.dropoff) || []).map((row) => ({
+    key: String(row.runs),
+    label: `${row.runs}${row.runs === 8 ? '+' : ''}`,
+    value: row.sessions,
+    tip: [
+      `${row.runs}${row.runs === 8 ? '+' : ''} runs in a sitting`,
+      `${formatCount(row.sessions)} sittings`
+    ]
+  }));
+
+  const scoreSeries = scores.map((row) => ({
+    key: `${row.score}`,
+    label: `${row.score}`,
+    value: row.reps,
+    tip: [`Mark ${row.score}`, `${formatCount(row.reps)} runs`]
+  }));
+
+  const topicSeries = topics.map((row) => ({
+    key: row.topic,
+    label: row.topic,
+    value: row.reps,
+    tip: [row.topic, `${formatCount(row.reps)} runs · average ${formatAverage(row.avg_score)}`]
+  }));
 
   // Every ticked filter has to pass, and the search box has to match either the
-  // name or the address.
-  const shownDelegates = delegates.filter((row) => {
-    const ticked = DELEGATE_FILTERS.filter((filter) => rowsFilter.includes(filter.id));
-    if (!ticked.every((filter) => filter.test(row, data && data.start))) return false;
-    const needle = rowSearch.trim().toLowerCase();
-    if (!needle) return true;
-    return `${row.name || ''} ${row.email || ''}`.toLowerCase().includes(needle);
-  });
+  // name or the address. The result is sorted last, so a filter never reshuffles
+  // the order the reader just chose.
+  const shownDelegates = delegates
+    .filter((row) => {
+      const ticked = DELEGATE_FILTERS.filter((filter) => rowsFilter.includes(filter.id));
+      if (!ticked.every((filter) => filter.test(row, data && data.start))) return false;
+      const needle = rowSearch.trim().toLowerCase();
+      if (!needle) return true;
+      return `${row.name || ''} ${row.email || ''} ${row.ip || ''}`
+        .toLowerCase()
+        .includes(needle);
+    })
+    .sort((a, b) => {
+      const delta = sortValue(a, sort.id) - sortValue(b, sort.id);
+      return sort.desc ? -delta : delta;
+    });
 
   const handleSignIn = async ({ credential }) => {
     setAuthError('');
@@ -460,6 +569,26 @@ export default function AdminStats({
                 <span className="stats-info-mark" aria-hidden="true">i</span>
                 What these numbers mean
               </button>
+
+              <div className="stats-chart-switch" role="group" aria-label="Chart type">
+                <span className="stats-chart-switch-label">Charts</span>
+                {[
+                  { id: 'bars', label: 'Bars' },
+                  { id: 'pie', label: 'Pie' },
+                  { id: 'line', label: 'Graph' }
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`stats-chart-switch-btn ${chartType === option.id ? 'is-active' : ''}`.trim()}
+                    aria-pressed={chartType === option.id}
+                    onClick={() => setChartType(option.id)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
               <span className="stats-updated">Updated {formatWhen(data.generated_at)}</span>
             </div>
 
@@ -589,7 +718,11 @@ export default function AdminStats({
                   <StatCard
                     label="Delegates"
                     value={formatCount(totals.delegates)}
-                    detail={`${formatCount(totals.delegates_new)} new in this window`}
+                    detail={
+                      totals.anonymous
+                        ? `${formatCount(totals.delegates_new)} new · ${formatCount(totals.anonymous)} anonymous visitors`
+                        : `${formatCount(totals.delegates_new)} new in this window`
+                    }
                   />
                   <StatCard
                     label="Active today"
@@ -645,42 +778,11 @@ export default function AdminStats({
 
                 <section className="stats-panel">
                   <h2 className="stats-panel-title">Runs per day</h2>
-                  <div className="stats-chart-frame">
-                    <div className="stats-chart-scale" aria-hidden="true">
-                      <span>{busiestDay}</span>
-                      <span>{Math.round(busiestDay / 2)}</span>
-                      <span>0</span>
-                    </div>
-                    <div
-                      className="stats-chart"
-                      role="img"
-                      aria-label={`Runs per day from ${formatDay(data.start)} to ${formatDay(data.end)}`}
-                    >
-                      {daily.map((day) => (
-                        <div className="stats-bar-slot" key={day.day} tabIndex={0}>
-                          <div
-                            className={`stats-bar ${day.reps === 0 ? 'is-empty' : ''}`.trim()}
-                            style={{ height: `${Math.round((day.reps / busiestDay) * 100)}%` }}
-                          />
-                          {/* The hover card is the same information the bar's own
-                              `title` carries, but readable: a native tooltip can
-                              take a second to appear and cannot be styled. */}
-                          <span className="stats-tip" role="tooltip">
-                            <b>{formatDay(day.day)}</b>
-                            <span>{formatCount(day.reps)} {day.reps === 1 ? 'run' : 'runs'}</span>
-                            <span>{formatCount(day.active_users)} active · {formatMoney(day.cost_usd)}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="stats-chart-axis" aria-hidden="true">
-                    {daily.map((day, index) => (
-                      <span key={day.day}>
-                        {index % Math.max(1, Math.ceil(daily.length / 7)) === 0 ? formatDay(day.day) : ''}
-                      </span>
-                    ))}
-                  </div>
+                  <StatsChart
+                    series={daySeries}
+                    type={chartType}
+                    ariaLabel={`Runs per day from ${formatDay(data.start)} to ${formatDay(data.end)}`}
+                  />
                   <p className="stats-chart-caption">
                     {daily.length > 0 && `${formatDay(daily[0].day)} → ${formatDay(daily[daily.length - 1].day)}`}
                     <span className="stats-chart-peak">busiest day: {busiestDay} runs</span>
@@ -820,21 +922,12 @@ export default function AdminStats({
                       />
                     </div>
 
-                    <div
-                      className="stats-chart"
-                      role="img"
-                      aria-label="How many runs each sitting reached"
-                    >
-                      {habits.dropoff.map((row) => (
-                        <div className="stats-bar-slot" key={row.runs}>
-                          <div
-                            className={`stats-bar ${row.sessions === 0 ? 'is-empty' : ''}`.trim()}
-                            style={{ height: `${Math.round((row.sessions / busiestDropoff) * 100)}%` }}
-                            title={`${row.runs}${row.runs === 8 ? '+' : ''} runs: ${row.sessions} sittings`}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    <StatsChart
+                      series={dropoffSeries}
+                      type={chartType}
+                      height={110}
+                      ariaLabel="How many runs each sitting reached"
+                    />
                     <p className="stats-chart-caption">
                       Runs reached per sitting, 0 → 8+
                       <span className="stats-chart-peak">where people stop</span>
@@ -888,27 +981,19 @@ export default function AdminStats({
                 <div className="stats-columns">
                   <section className="stats-panel">
                     <h2 className="stats-panel-title">Score spread</h2>
-                    <div className="stats-rows">
-                      {scores.map((row) => (
-                        <div className="stats-row" key={row.score}>
-                          <span className="stats-row-key">{row.score}</span>
-                          <div className="stats-row-track">
-                            <div
-                              className={`stats-row-fill ${row.score >= 7 ? 'is-high' : row.score >= 5 ? 'is-mid' : 'is-low'}`}
-                              style={{ width: `${Math.round((row.reps / busiestScore) * 100)}%` }}
-                            />
-                          </div>
-                          <span className="stats-row-value">{row.reps}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <StatsChart
+                      series={scoreSeries}
+                      type={chartType}
+                      height={120}
+                      ariaLabel="How many runs landed on each mark"
+                    />
                   </section>
 
                   <section className="stats-panel">
                     <h2 className="stats-panel-title">Topics</h2>
                     {topics.length === 0 ? (
                       <p className="stats-empty">No topics in this window.</p>
-                    ) : (
+                    ) : chartType === 'bars' ? (
                       <div className="stats-rows">
                         {topics.map((row) => (
                           <div className="stats-row is-topic" key={row.topic}>
@@ -920,6 +1005,13 @@ export default function AdminStats({
                           </div>
                         ))}
                       </div>
+                    ) : (
+                      <StatsChart
+                        series={topicSeries}
+                        type={chartType}
+                        height={120}
+                        ariaLabel="Runs by topic"
+                      />
                     )}
                   </section>
                 </div>
@@ -979,10 +1071,34 @@ export default function AdminStats({
                     )}
                   </div>
 
+                  <div className="stats-sorts" role="group" aria-label="Sort delegates">
+                    <span className="stats-sorts-label">Sort</span>
+                    {DELEGATE_SORTS.map((option) => {
+                      const active = sort.id === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`stats-sort ${active ? 'is-active' : ''}`.trim()}
+                          aria-pressed={active}
+                          onClick={() =>
+                            setSort((current) =>
+                              current.id === option.id
+                                ? { id: option.id, desc: !current.desc }
+                                : { id: option.id, desc: true }
+                            )
+                          }
+                        >
+                          {active && !sort.desc ? option.flipped : option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <input
                     className="user-search"
                     type="search"
-                    placeholder="Search name or email..."
+                    placeholder="Search name, email or address..."
                     aria-label="Search delegates"
                     value={rowSearch}
                     onChange={(event) => setRowSearch(event.target.value)}
@@ -999,28 +1115,42 @@ export default function AdminStats({
                         <span className="stats-num">Runs</span>
                         <span className="stats-num">Avg</span>
                         <span className="stats-num">Best</span>
+                        <span className="stats-num" title="Runs hidden from the figures">
+                          Excl.
+                        </span>
                       </div>
                       {shownDelegates.map((row) => (
                         <button
                           type="button"
-                          className="stats-table-row is-clickable"
+                          className={`stats-table-row is-clickable ${isAnonymous(row) ? 'is-guest' : ''}`.trim()}
                           key={row.sub || row.email || row.name || row.reps}
                           onClick={() => setOpenUser(row.sub || null)}
                           disabled={!row.sub}
                           title={row.sub ? 'Open this delegate' : 'No account id on this row'}
                         >
                           <span className="stats-delegate">
-                            <span className="stats-delegate-name">{row.name || 'Delegate'}</span>
-                            {row.email && <span className="stats-delegate-email">{row.email}</span>}
+                            <span className="stats-delegate-name">{delegateName(row)}</span>
+                            {delegateHandle(row) && (
+                              <span className="stats-delegate-email">{delegateHandle(row)}</span>
+                            )}
                           </span>
                           <span className="stats-num">{formatCount(row.reps)}</span>
                           <span className="stats-num">{formatAverage(row.average_score)}</span>
                           <span className="stats-num">{formatAverage(row.best_score)}</span>
+                          <span className={`stats-num ${row.excluded_reps ? 'is-hidden-runs' : ''}`.trim()}>
+                            {row.excluded_reps ? formatCount(row.excluded_reps) : '—'}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
                 </section>
+
+                <ExportPanel
+                  delegates={delegates}
+                  defaultStart={data.start || ''}
+                  defaultEnd={inclusiveDay(data.end)}
+                />
 
                 <section className="stats-panel stats-storage">
                   <h2 className="stats-panel-title">What gets stored</h2>
@@ -1097,6 +1227,9 @@ export default function AdminStats({
 
       {openUser && (
         <UserDrawer
+          // Keyed by the account: opening somebody else starts a fresh drawer,
+          // with no ticked runs carried over from the last person.
+          key={openUser}
           sub={openUser}
           onClose={() => setOpenUser(null)}
           // A deleted or excluded run changes every number on this page, so the

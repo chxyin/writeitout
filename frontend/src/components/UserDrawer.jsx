@@ -56,8 +56,9 @@ function seconds(ms) {
 }
 
 /** One run. Everything long is folded away, because the list can be hundreds. */
-function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
+function RepCard({ rep, busy, onExclude, onDelete, onScore, selectable, checked, onCheck }) {
   const [confirming, setConfirming] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const save = (raw) => {
     const value = Number(raw);
@@ -66,23 +67,87 @@ function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
     onScore(rep.id, value);
   };
 
-  return (
-    <details className={`user-rep ${rep.excluded ? 'is-excluded' : ''}`.trim()}>
-      <summary className="user-rep-head">
-        <span className={`user-rep-score ${rep.score >= 7 ? 'is-high' : rep.score >= 5 ? 'is-mid' : 'is-low'}`}>
-          {rep.score === null ? '—' : `${rep.score}`}
-        </span>
-        <span className="user-rep-topic">{rep.topic || 'Practice'}</span>
-        <span className="user-rep-meta">
-          {rep.excluded && <span className="user-rep-tag is-excluded">excluded</span>}
-          {rep.committee && <span className="user-rep-tag">{rep.committee}</span>}
-          {rep.timed_out && <span className="user-rep-tag is-warn">buzzer</span>}
-          <span className="user-rep-when">{when(rep.created_at)}</span>
-        </span>
-      </summary>
+  // The bar carries the two things a developer does most often — re-mark a run
+  // and take it out of the statistics — so neither needs the card opened first.
+  // The body keeps only the delete, which is destructive enough to want a second
+  // look at what is about to go.
+  const bar = (
+    <>
+      <span className={`user-rep-score ${rep.score >= 7 ? 'is-high' : rep.score >= 5 ? 'is-mid' : 'is-low'}`}>
+        {rep.score === null ? '—' : `${rep.score}`}
+      </span>
+      <span className="user-rep-topic">{rep.topic || 'Practice'}</span>
+      <span className="user-rep-meta">
+        {rep.excluded && <span className="user-rep-tag is-excluded">excluded</span>}
+        {rep.committee && <span className="user-rep-tag">{rep.committee}</span>}
+        {rep.timed_out && <span className="user-rep-tag is-warn">buzzer</span>}
+        <span className="user-rep-when">{when(rep.created_at)}</span>
+      </span>
+    </>
+  );
 
-      <div className="user-rep-body">
-        <div className="user-rep-grid">
+  if (selectable) {
+    return (
+      <div className={`user-rep is-selectable ${rep.excluded ? 'is-excluded' : ''}`.trim()}>
+        <span className="user-rep-head">
+          <input
+            type="checkbox"
+            className="user-rep-check"
+            checked={checked}
+            onChange={onCheck}
+            aria-label={`Select ${rep.topic || 'this run'}`}
+          />
+          {bar}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`user-rep ${open ? 'is-open' : ''} ${rep.excluded ? 'is-excluded' : ''}`.trim()}>
+      <div className="user-rep-head">
+        <button
+          type="button"
+          className="user-rep-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((wasOpen) => !wasOpen)}
+        >
+          {bar}
+        </button>
+        <span className="user-rep-bar-actions">
+          <label className="user-rep-override">
+            <span>Score</span>
+            <input
+              // Uncontrolled and keyed by the stored mark: a re-read after a save
+              // remounts it on the new value, and typing in between is never
+              // overwritten by a render.
+              key={String(rep.score)}
+              type="number"
+              min="0"
+              max="10"
+              step="0.5"
+              defaultValue={rep.score === null ? '' : String(rep.score)}
+              disabled={busy}
+              onBlur={(event) => save(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="user-rep-action"
+            disabled={busy}
+            onClick={() => onExclude(rep.id, !rep.excluded)}
+          >
+            {rep.excluded ? 'Include' : 'Exclude'}
+          </button>
+        </span>
+      </div>
+
+      {open && (
+        <div className="user-rep-body">
+          <div className="user-rep-grid">
           <span><b>Written in</b>{seconds(rep.write_ms)}</span>
           <span><b>Graded in</b>{seconds(rep.latency_ms)}</span>
           <span><b>Tokens</b>{count((rep.prompt_tokens || 0) + (rep.completion_tokens || 0))}</span>
@@ -119,36 +184,9 @@ function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
           </div>
         )}
 
-        {/* Developer actions. Excluding is reversible and only hides the run from
-            the statistics; deleting cannot be undone, so it asks first. */}
+        {/* The only action left in the body: deleting cannot be undone, so it
+            asks first and sits where a mis-click is less likely. */}
         <div className="user-rep-actions">
-          <label className="user-rep-override">
-            <span>Score</span>
-            <input
-              // Uncontrolled and keyed by the stored mark: a re-read after a save
-              // remounts it on the new value, and typing in between is never
-              // overwritten by a render.
-              key={String(rep.score)}
-              type="number"
-              min="0"
-              max="10"
-              step="0.5"
-              defaultValue={rep.score === null ? '' : String(rep.score)}
-              disabled={busy}
-              onBlur={(event) => save(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') event.currentTarget.blur();
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="user-rep-action"
-            disabled={busy}
-            onClick={() => onExclude(rep.id, !rep.excluded)}
-          >
-            {rep.excluded ? 'Include again' : 'Exclude from stats'}
-          </button>
           {confirming ? (
             <>
               <button
@@ -175,12 +213,13 @@ function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
               disabled={busy}
               onClick={() => setConfirming(true)}
             >
-              Delete
+              Delete this run
             </button>
           )}
         </div>
-      </div>
-    </details>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -199,6 +238,12 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
   const [token, setToken] = useState(0);
   const [busyId, setBusyId] = useState('');
   const [actionError, setActionError] = useState('');
+  // Selecting runs to change several at once: the list is up to 300 rows, and
+  // excluding a bad batch one card at a time is the kind of chore that stops a
+  // developer tidying anything.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,8 +311,59 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
     );
   }, [filter, reps]);
 
+  // Only the rows on screen can be ticked: Select all means "all of these",
+  // which is the list the developer is looking at.
+  const visibleIds = visible.map((rep) => rep.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+
+  const toggleOne = (id) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(visibleIds));
+  };
+
+  // One pass over the ticked runs. The calls are sequential on purpose: they are
+  // a handful of small writes, and a burst of parallel ones buys nothing but a
+  // race in the recount that follows each.
+  const bulk = async (excluded) => {
+    const ids = visibleIds.filter((id) => selected.has(id));
+    if (!ids.length || bulkBusy) return;
+    setBulkBusy(true);
+    setActionError('');
+    let failed = 0;
+    for (const id of ids) {
+      const result = await patchRep(id, { excluded });
+      if (!result.ok) failed += 1;
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    setToken((current) => current + 1);
+    if (onChanged) onChanged();
+    if (failed) {
+      setActionError(
+        `${failed} of ${ids.length} runs could not be ${excluded ? 'excluded' : 'restored'}.`
+      );
+    }
+  };
+
   const stamp = new Date().toISOString().slice(0, 10);
   const who = user && user.email ? user.email.split('@')[0] : 'delegate';
+  // A guest has no account to name, so the newest address is the name. It is
+  // the same handle the dashboard's table shows.
+  const guest = String(sub || '').startsWith('anon:');
+  const address = user && user.ips && user.ips.length ? user.ips[0].ip : '';
+  const displayName = guest
+    ? `Anonymous${address ? ` ${address}` : ''}`
+    : user
+      ? user.name || 'Delegate'
+      : 'Reading...';
 
   return (
     <div className="drawer-backdrop" role="presentation" onClick={onClose}>
@@ -275,7 +371,7 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
         className="user-drawer"
         role="dialog"
         aria-modal="true"
-        aria-label={user ? `${user.name || user.email} in detail` : 'Delegate in detail'}
+        aria-label={user ? `${displayName} in detail` : 'Delegate in detail'}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="user-drawer-top">
@@ -284,12 +380,16 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
               <img className="avatar" src={user.picture} alt="" width="44" height="44" referrerPolicy="no-referrer" />
             ) : (
               <div className="avatar" aria-hidden="true">
-                {String((user && (user.name || user.email)) || 'D').trim().charAt(0).toUpperCase() || 'D'}
+                {String(displayName || 'D').trim().charAt(0).toUpperCase() || 'D'}
               </div>
             )}
             <div className="user-drawer-names">
-              <span className="user-drawer-name">{user ? user.name || 'Delegate' : 'Reading...'}</span>
-              {user && user.email && <span className="user-drawer-email">{user.email}</span>}
+              <span className="user-drawer-name">{displayName}</span>
+              {guest ? (
+                <span className="user-drawer-email">not signed in</span>
+              ) : (
+                user && user.email && <span className="user-drawer-email">{user.email}</span>
+              )}
               <span className="user-drawer-sub">sub · {sub}</span>
             </div>
           </div>
@@ -346,7 +446,7 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
               <div className="stats-fact">
                 <span className="stats-fact-label">Answers stored</span>
                 <span className="stats-fact-value is-small">
-                  {user.store_answers ? 'yes' : 'opted out'}
+                  {guest ? 'never for guests' : user.store_answers ? 'yes' : 'opted out'}
                 </span>
               </div>
             </div>
@@ -376,14 +476,54 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
             <section className="user-drawer-reps">
               <div className="user-drawer-reps-head">
                 <h3 className="stats-panel-title">God Mode — every run ({count(reps.length)})</h3>
-                <button
-                  type="button"
-                  className="stats-choice-btn is-inline"
-                  onClick={() => downloadRepsCsv(reps, who, stamp)}
-                >
-                  Download CSV
-                </button>
+                <div className="user-drawer-reps-actions">
+                  <button
+                    type="button"
+                    className={`stats-choice-btn is-inline ${selecting ? 'is-active' : ''}`.trim()}
+                    aria-pressed={selecting}
+                    onClick={() => {
+                      setSelecting((on) => !on);
+                      setSelected(new Set());
+                    }}
+                  >
+                    {selecting ? 'Done' : 'Select'}
+                  </button>
+                  <button
+                    type="button"
+                    className="stats-choice-btn is-inline"
+                    onClick={() => downloadRepsCsv(reps, who, stamp)}
+                  >
+                    Download CSV
+                  </button>
+                </div>
               </div>
+
+              {selecting && (
+                <div className="user-drawer-bulk" role="group" aria-label="Change selected runs">
+                  <span className="user-drawer-bulk-count">
+                    {selected.size} of {visibleIds.length} selected
+                  </span>
+                  <button type="button" className="user-rep-action is-quiet" onClick={toggleAll}>
+                    {allSelected ? 'Clear' : 'Select all'}
+                  </button>
+                  <button
+                    type="button"
+                    className="user-rep-action"
+                    disabled={!selected.size || bulkBusy}
+                    onClick={() => bulk(true)}
+                  >
+                    Exclude selected
+                  </button>
+                  <button
+                    type="button"
+                    className="user-rep-action is-quiet"
+                    disabled={!selected.size || bulkBusy}
+                    onClick={() => bulk(false)}
+                  >
+                    Include again
+                  </button>
+                </div>
+              )}
 
               {reps.length > 4 && (
                 <input
@@ -409,6 +549,9 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
                       rep={rep}
                       key={rep.id || position}
                       busy={busyId === rep.id}
+                      selectable={selecting}
+                      checked={selected.has(rep.id)}
+                      onCheck={() => toggleOne(rep.id)}
                       onExclude={(id, next) => act(id, () => patchRep(id, { excluded: next }))}
                       onDelete={(id) => act(id, () => deleteRep(id))}
                       onScore={(id, value) => act(id, () => patchRep(id, { score: value }))}

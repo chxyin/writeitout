@@ -37,6 +37,17 @@ DEFAULT_STORAGE_MODE = os.getenv("POI_STORAGE_MODE", "full").strip().lower()
 if DEFAULT_STORAGE_MODE not in STORAGE_MODES:
     DEFAULT_STORAGE_MODE = "full"
 
+# Anonymous practice is recorded under a key derived from the address rather
+# than an account, so the developer view can see "somebody at this address
+# practised 9 times" instead of nothing at all. The prefix is how every query
+# tells the two kinds of delegate apart.
+GUEST_PREFIX = "anon:"
+
+
+def is_guest(sub: str | None) -> bool:
+    """True for the address-derived identities that stand in for anonymous users."""
+    return str(sub or "").startswith(GUEST_PREFIX)
+
 
 class StatsError(RuntimeError):
     """A dashboard query failed, tagged with the section that failed.
@@ -67,6 +78,38 @@ def _redact(error: Exception) -> str:
 def _iso(value: Any) -> Any:
     """A datetime as an ISO string; anything else is handed back untouched."""
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _export_row(row: Any) -> dict[str, Any]:
+    """One run, in the shape the export formats and the browser both read."""
+    return {
+        "id": str(row.get("id") or ""),
+        "sub": str(row.get("user_sub") or ""),
+        "email": row.get("email") or "",
+        "name": row.get("display_name") or "",
+        "drill_id": row.get("drill_id") or "",
+        "topic": row.get("topic") or "",
+        "mode": row.get("mode") or "full",
+        "score": float(row["score"]) if row.get("score") is not None else None,
+        "timed_out": bool(row.get("timed_out")),
+        "created_at": _iso(row.get("created_at")),
+        "speech": row.get("prompt_text") or "",
+        "answer": row.get("poi") or "",
+        "answer_chars": int(row.get("poi_chars") or 0),
+        "grade_label": row.get("grade_label") or "",
+        "reasoning": row.get("reasoning") or "",
+        "feedback": row.get("constructive_feedback") or "",
+        "rewritten": row.get("rewritten_poi") or "",
+        "rewrite_notes": row.get("rewrite_explanation") or "",
+        "write_ms": row.get("write_ms"),
+        "latency_ms": row.get("latency_ms"),
+        "prompt_tokens": int(row.get("prompt_tokens") or 0),
+        "completion_tokens": int(row.get("completion_tokens") or 0),
+        "model": row.get("model") or "",
+        "seconds_per_rep": int(row.get("seconds_per_rep") or 0),
+        "session_completed": bool(row.get("session_completed")),
+        "excluded": bool(row.get("excluded")),
+    }
 
 
 def _median(values: Iterable[float]) -> float | None:
@@ -195,6 +238,22 @@ class Store:
         """Everything that account has ever submitted, newest first."""
         raise NotImplementedError
 
+    def admin_export_rows(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        include: Iterable[str] = (),
+        exclude: Iterable[str] = (),
+        bands: Iterable[tuple[float, float]] = (),
+        include_hidden: bool = False,
+        only_with_text: bool = False,
+        oldest_first: bool = True,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        """Runs in a window, filtered for a training set."""
+        raise NotImplementedError
+
     def admin_set_rep(
         self,
         rep_id: str,
@@ -258,6 +317,12 @@ class Store:
 
     # -- helpers ------------------------------------------------------------ #
     def should_store_answers(self, sub: str) -> bool:
+        # A guest keeps a score and loses the writing. There is no account to
+        # hang consent on, and the answer text is the only genuinely personal
+        # thing this app holds, so the safe default for an anonymous visitor is
+        # to record that they practised and how they did — not what they wrote.
+        if is_guest(sub):
+            return False
         if self.storage_mode() != "full":
             return False
         delegate = self.get_delegate(sub)
@@ -556,6 +621,63 @@ class MemoryStore(Store):
             ],
         }
 
+    def admin_export_rows(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        include: Iterable[str] = (),
+        exclude: Iterable[str] = (),
+        bands: Iterable[tuple[float, float]] = (),
+        include_hidden: bool = False,
+        only_with_text: bool = False,
+        oldest_first: bool = True,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        include = [sub for sub in include if sub]
+        exclude = [sub for sub in exclude if sub]
+        bands = [(low, high) for low, high in bands if low is not None and high is not None]
+        with self._lock:
+            reps = [dict(rep) for rep in self._reps.values()]
+            delegates = {sub: dict(row) for sub, row in self._delegates.items()}
+            sessions = {str(row["id"]): dict(row) for row in self._sessions.values()}
+
+        rows = []
+        for rep in reps:
+            created = rep.get("created_at")
+            if created is None or not (start <= created < end):
+                continue
+            sub = str(rep.get("user_sub") or "")
+            if include and sub not in include:
+                continue
+            if sub in exclude:
+                continue
+            score = float(rep["score"]) if rep.get("score") is not None else None
+            if bands and not any(
+                score is not None and low <= score <= high for low, high in bands
+            ):
+                continue
+            if not include_hidden and rep.get("excluded"):
+                continue
+            if only_with_text and not (rep.get("poi") or ""):
+                continue
+            session = sessions.get(str(rep.get("session_id"))) or {}
+            delegate = delegates.get(sub) or {}
+            rows.append(
+                _export_row(
+                    {
+                        **rep,
+                        "user_sub": sub,
+                        "email": delegate.get("email"),
+                        "display_name": delegate.get("display_name"),
+                        "seconds_per_rep": session.get("seconds_per_rep"),
+                        "session_completed": session.get("completed"),
+                    }
+                )
+            )
+        rows.sort(key=lambda row: row.get("created_at") or "", reverse=not oldest_first)
+        return rows[: max(1, min(20000, int(limit)))]
+
     def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
         with self._lock:
             reps = [dict(r) for r in self._reps.values() if r["user_sub"] == sub]
@@ -650,6 +772,13 @@ class MemoryStore(Store):
             sessions = [dict(s) for s in self._sessions.values()]
             reps = [dict(r) for r in self._reps.values()]
             ticks = [dict(t) for t in self._ticks]
+            address_book = {sub: dict(entries) for sub, entries in self._ips.items()}
+
+        # Guests count as practice, not as delegates: they are one address with
+        # no account behind it, so they appear in the table but not in the
+        # sign-up and retention numbers.
+        accounts = [d for d in delegates if not is_guest(str(d.get("user_sub") or ""))]
+        guests = [d for d in delegates if is_guest(str(d.get("user_sub") or ""))]
 
         recent_reps = [
             r for r in reps if since <= r["created_at"] < end and not r.get("excluded")
@@ -713,6 +842,13 @@ class MemoryStore(Store):
         busiest = sorted(
             delegates, key=lambda d: int(d.get("total_reps") or 0), reverse=True
         )[:200]
+
+        def newest_address(sub: str) -> str:
+            entries = address_book.get(sub) or {}
+            if not entries:
+                return ""
+            return max(entries, key=lambda ip: entries[ip]["last_seen"])
+
         delegate_rows = [
             {
                 "sub": str(delegate.get("user_sub") or ""),
@@ -734,6 +870,19 @@ class MemoryStore(Store):
                 "last_practice_on": _iso(delegate.get("last_practice_on")),
                 "created_at": _iso(delegate.get("created_at")),
                 "store_answers": bool(delegate.get("store_answers", True)),
+                "ip": newest_address(str(delegate.get("user_sub") or "")),
+                "active_seconds": len(
+                    [t for t in ticks if t["user_sub"] == delegate.get("user_sub")]
+                )
+                * 60,
+                "excluded_reps": len(
+                    [
+                        r
+                        for r in reps
+                        if r["user_sub"] == delegate.get("user_sub") and r.get("excluded")
+                    ]
+                ),
+                "guest": is_guest(str(delegate.get("user_sub") or "")),
             }
             for delegate in busiest
         ]
@@ -746,7 +895,7 @@ class MemoryStore(Store):
 
         # ---- lifecycle: retention, cohorts, who has gone quiet ------------- #
         today = now.date()
-        joined_on = {str(d["user_sub"]): day_of(d["created_at"]) for d in delegates}
+        joined_on = {str(d["user_sub"]): day_of(d["created_at"]) for d in accounts}
         practice_days: dict[str, set[date]] = {}
         for rep in reps:
             practice_days.setdefault(str(rep["user_sub"]), set()).add(
@@ -800,7 +949,7 @@ class MemoryStore(Store):
 
         quiet_rows = []
         active_7 = active_14 = quiet_30 = never = 0
-        for delegate in delegates:
+        for delegate in accounts:
             last = delegate.get("last_practice_on")
             if isinstance(last, datetime):
                 last = last.astimezone(HK).date()
@@ -864,8 +1013,9 @@ class MemoryStore(Store):
             "start": start.date().isoformat(),
             "end": end.date().isoformat(),
             "totals": {
-                "delegates": len(delegates),
-                "delegates_new": len([d for d in delegates if d["created_at"] >= since]),
+                "delegates": len(accounts),
+                "delegates_new": len([d for d in accounts if d["created_at"] >= since]),
+                "anonymous": len(guests),
                 "reps_all": len(reps),
                 "sessions_all": len(sessions),
                 "sessions": len(recent_sessions),
@@ -1476,6 +1626,71 @@ class PostgresStore(Store):
                 (sub, sub),
             )
 
+    def admin_export_rows(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        include: Iterable[str] = (),
+        exclude: Iterable[str] = (),
+        bands: Iterable[tuple[float, float]] = (),
+        include_hidden: bool = False,
+        only_with_text: bool = False,
+        oldest_first: bool = True,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        """Every run in a window, for a training set.
+
+        `bands` is a list of inclusive mark ranges — [(7, 10), (1, 3)] exports
+        exactly those runs and nothing in between, which is how a reviewer who
+        wants "the best and the worst" builds a set without a second pass.
+        """
+        clauses = ["r.created_at >= %s", "r.created_at < %s"]
+        params: list[Any] = [start, end]
+        include = [sub for sub in include if sub]
+        exclude = [sub for sub in exclude if sub]
+        if include:
+            clauses.append("r.user_sub = any(%s)")
+            params.append(include)
+        if exclude:
+            clauses.append("not (r.user_sub = any(%s))")
+            params.append(exclude)
+        bands = [(low, high) for low, high in bands if low is not None and high is not None]
+        if bands:
+            clauses.append(
+                "(" + " or ".join("r.score between %s and %s" for _ in bands) + ")"
+            )
+            for low, high in bands:
+                params.extend([low, high])
+        if not include_hidden:
+            clauses.append("not r.excluded")
+        if only_with_text:
+            clauses.append("r.poi is not null and r.poi <> ''")
+        where = " and ".join(clauses)
+        order = "asc" if oldest_first else "desc"
+
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                select r.id, r.drill_id, r.topic, r.mode, r.score, r.timed_out,
+                       r.poi, r.poi_chars, r.prompt_text, r.grade_label, r.reasoning,
+                       r.constructive_feedback, r.rewritten_poi, r.rewrite_explanation,
+                       r.latency_ms, r.write_ms, r.prompt_tokens, r.completion_tokens,
+                       r.model, r.created_at, r.excluded, r.user_sub,
+                       d.email, d.display_name,
+                       coalesce(s.seconds_per_rep, 0) as seconds_per_rep,
+                       coalesce(s.completed, false) as session_completed
+                from reps r
+                left join practice_sessions s on s.id = r.session_id
+                left join delegates d on d.user_sub = r.user_sub
+                where {where}
+                order by r.created_at {order}
+                limit %s
+                """,
+                (*params, max(1, min(20000, int(limit)))),
+            ).fetchall()
+        return [_export_row(row) for row in rows]
+
     def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -1560,9 +1775,13 @@ class PostgresStore(Store):
             totals = run("totals",
                 f"""
                 select
-                    (select count(*) from delegates) as delegates,
-                    (select count(*) from delegates where created_at >= %s and created_at < %s)
-                        as delegates_new,
+                    (select count(*) from delegates
+                     where left(user_sub, 5) <> '{GUEST_PREFIX}') as delegates,
+                    (select count(*) from delegates
+                     where left(user_sub, 5) <> '{GUEST_PREFIX}'
+                       and created_at >= %s and created_at < %s) as delegates_new,
+                    (select count(*) from delegates
+                     where left(user_sub, 5) = '{GUEST_PREFIX}') as anonymous,
                     (select count(*) from reps) as reps_all,
                     (select count(*) from practice_sessions) as sessions_all
                 """,
@@ -1686,11 +1905,29 @@ class PostgresStore(Store):
 
             busiest = run("delegates",
                 """
-                select user_sub, email, display_name, total_reps, score_sum, best_score,
-                       longest_streak, last_seen_at, last_practice_on, created_at,
-                       store_answers
-                from delegates
-                order by total_reps desc, last_seen_at desc
+                select d.user_sub, d.email, d.display_name, d.total_reps, d.score_sum,
+                       d.best_score, d.longest_streak, d.last_seen_at, d.last_practice_on,
+                       d.created_at, d.store_answers,
+                       -- The newest address: a guest has no name, so this is what
+                       -- the panel shows instead ("Anonymous 203.0.113.24"), and
+                       -- for an account it is the last place they practised from.
+                       loc.ip,
+                       -- Runs the developer took out of the figures. They are
+                       -- already gone from total_reps, so this is shown beside
+                       -- the count rather than added to it — "9 runs, 2 hidden".
+                       (select count(*) from reps r
+                        where r.user_sub = d.user_sub and r.excluded) as excluded_reps,
+                       -- Time on app, from the visible-minute heartbeats.
+                       (select count(*) from activity_ticks t
+                        where t.user_sub = d.user_sub) * 60 as active_seconds
+                from delegates d
+                left join lateral (
+                    select ip from user_ips
+                    where user_sub = d.user_sub
+                    order by last_seen desc
+                    limit 1
+                ) loc on true
+                order by d.total_reps desc, d.last_seen_at desc
                 limit 200
                 """
             ).fetchall()
@@ -1700,10 +1937,11 @@ class PostgresStore(Store):
             # usual D1/D7/D30 read. A signup that has not yet had those days is
             # left out of the denominator instead of being counted as lost.
             retention = run("retention",
-                """
+                f"""
                 with joined as (
                     select user_sub, (created_at at time zone 'Asia/Hong_Kong')::date as day
                     from delegates
+                    where left(user_sub, 5) <> '{GUEST_PREFIX}'
                 ),
                 marks as (
                     select j.user_sub, j.day,
@@ -1731,13 +1969,14 @@ class PostgresStore(Store):
             # were back in each of the following four weeks. This is the habit
             # question the totals cannot answer — "do new delegates come back".
             cohorts = run("cohorts",
-                """
+                f"""
                 with joined as (
                     select user_sub,
                            date_trunc('week', created_at at time zone 'Asia/Hong_Kong')::date
                                as week
                     from delegates
                     where created_at > now() - interval '9 weeks'
+                      and left(user_sub, 5) <> '{GUEST_PREFIX}'
                 ),
                 marks as (
                     select j.user_sub, j.week,
@@ -1767,7 +2006,7 @@ class PostgresStore(Store):
             # Who has gone quiet. `never` is a signed-in account with no graded
             # run at all — a different problem from a delegate who stopped.
             lapsed_counts = run("lapsed_counts",
-                """
+                f"""
                 select
                     count(*) filter (where last_practice_on >= current_date - 7)
                         as active_7,
@@ -1781,15 +2020,17 @@ class PostgresStore(Store):
                         as quiet_30,
                     count(*) filter (where last_practice_on is null) as never
                 from delegates
+                where left(user_sub, 5) <> '{GUEST_PREFIX}'
                 """
             ).fetchone()
 
             lapsed = run("lapsed",
-                """
+                f"""
                 select email, display_name, total_reps, last_practice_on,
                        (current_date - last_practice_on) as days_ago
                 from delegates
                 where last_practice_on is not null and last_practice_on < current_date - 14
+                  and left(user_sub, 5) <> '{GUEST_PREFIX}'
                 order by last_practice_on desc
                 limit 8
                 """
@@ -1904,6 +2145,12 @@ class PostgresStore(Store):
                     "last_practice_on": _iso(row.get("last_practice_on")),
                     "created_at": _iso(row.get("created_at")),
                     "store_answers": bool(row.get("store_answers", True)),
+                    # Guests have neither name nor email; the address is the
+                    # only handle the panel can show.
+                    "ip": row.get("ip") or "",
+                    "active_seconds": whole(row.get("active_seconds")),
+                    "excluded_reps": whole(row.get("excluded_reps")),
+                    "guest": is_guest(str(row.get("user_sub") or "")),
                 }
             )
 
@@ -1935,6 +2182,7 @@ class PostgresStore(Store):
             "totals": {
                 "delegates": whole(totals["delegates"]),
                 "delegates_new": whole(totals["delegates_new"]),
+                "anonymous": whole(totals["anonymous"]),
                 "reps_all": whole(totals["reps_all"]),
                 "sessions_all": whole(totals["sessions_all"]),
                 "sessions": whole(sessions["sessions"]),

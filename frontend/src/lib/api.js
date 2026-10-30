@@ -3,7 +3,7 @@
  * a readable error.
  *
  * Every call is bounded in time. A Vercel function that hangs must surface as a
- * failed save, not as a screen stuck on "savingâ€¦".
+ * failed save, not as a screen stuck on "saving…".
  */
 
 import { authorizationHeaders } from './auth.js';
@@ -29,7 +29,7 @@ class ApiError extends Error {
 /**
  * The error body, as a message and a code. FastAPI's `detail` is a string for
  * most failures and an object `{ message, code }` for the ones that carry a
- * code â€” both shapes arrive here and leave as two strings.
+ * code — both shapes arrive here and leave as two strings.
  */
 function readError(data) {
   const detail = data && data.detail;

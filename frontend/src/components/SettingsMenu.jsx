@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { ZOOM_RANGE } from '../lib/zoom.js';
-import { COLOR_THEMES, BACKGROUNDS, NIGHT_HUE_RANGE, nightTint } from '../lib/appearance.js';
+import {
+  COLOR_THEMES,
+  BACKGROUNDS,
+  NIGHT_HUE_RANGE,
+  NIGHT_STRENGTH_RANGE,
+  nightTint
+} from '../lib/appearance.js';
 import {
   TOP_OFFSET_RANGE,
   BOTTOM_OFFSET_RANGE,
@@ -27,6 +33,9 @@ const asPx = (value) => `${value}px`;
 // A hue angle, not a percentage: "45°" is what the slider in a colour picker
 // would say, and it is the unit the CSS custom property takes.
 const asHue = (value) => `${value}°`;
+// Night light strength is a plain 0–100 percentage, the unit the reference
+// design used ("Night Light 33%").
+const asPercentOf100 = (value) => `${value}%`;
 
 /**
  * One preference row: a minus / range / plus control with the readout doubling
@@ -98,6 +107,8 @@ export default function SettingsMenu({
   onLowIntensityToggle,
   nightLight,
   onNightLightToggle,
+  nightStrength,
+  onNightStrengthChange,
   nightHue,
   onNightHueChange,
   theme,
@@ -251,7 +262,7 @@ export default function SettingsMenu({
                   </span>
                   <small>
                     {nightLight
-                      ? 'Every colour on the page is warmed a little, for practising after dark.'
+                      ? 'A warm lens over every colour, for practising after dark.'
                       : 'Colours are as the app was designed — no warm cast.'}
                   </small>
                 </div>
@@ -267,13 +278,22 @@ export default function SettingsMenu({
                 </button>
               </div>
               {nightLight && (
-                <SliderRow
-                  label="Warmth"
-                  value={nightHue}
-                  range={NIGHT_HUE_RANGE}
-                  formatValue={asHue}
-                  onChange={onNightHueChange}
-                />
+                <>
+                  <SliderRow
+                    label="Strength"
+                    value={nightStrength}
+                    range={NIGHT_STRENGTH_RANGE}
+                    formatValue={asPercentOf100}
+                    onChange={onNightStrengthChange}
+                  />
+                  <SliderRow
+                    label="Warmth"
+                    value={nightHue}
+                    range={NIGHT_HUE_RANGE}
+                    formatValue={asHue}
+                    onChange={onNightHueChange}
+                  />
+                </>
               )}
 
               {/* The one setting that is about the account rather than the screen:

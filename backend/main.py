@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
-from store import STORAGE_MODES, StatsError, get_store, store_source
+from store import GUEST_PREFIX, STORAGE_MODES, StatsError, get_store, store_source
 
 load_dotenv()
 
@@ -208,6 +208,20 @@ def visitor_id(request: Request) -> str:
     # No header (an old client, or cookies blocked): count the address instead, so
     # the gate still exists rather than silently letting everything through.
     return f"ip-{hashlib.sha256(client_identifier(request).encode()).hexdigest()[:32]}"
+
+
+def guest_sub(request: Request) -> str:
+    """The stand-in account for a visitor who has not signed in.
+
+    Anonymous practice is still practice: without a key it would vanish, and the
+    developer view would be blind to everyone who never signs in. The key is the
+    address, hashed — one visitor per address, stable across visits — with the
+    address itself kept beside it in `user_ips` so the panel can say *which*
+    address rather than showing a hash nobody can read. Two delegates behind one
+    school NAT are one guest, which is the honest reading of an address.
+    """
+    digest = hashlib.sha256(f"guest:{client_identifier(request)}".encode()).hexdigest()
+    return f"{GUEST_PREFIX}{digest[:24]}"
 
 
 # --------------------------------------------------------------------------- #
@@ -865,19 +879,30 @@ def me(request: Request) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Practice data
 #
-# Everything below writes or reads one account's practice record. The account
-# comes from the verified token, never from the body, so a delegate can only
-# touch their own rows.
+# Everything below writes or reads one practice record. For a signed-in delegate
+# the account comes from the verified token, never from the body, so nobody can
+# touch another account's rows. A visitor who has not signed in writes under the
+# address-derived guest identity instead — practice that is not recorded is
+# practice the developer view cannot see.
 # --------------------------------------------------------------------------- #
+def practising_identity(request: Request) -> dict[str, Any]:
+    """The account behind a practice write, or the address-derived guest."""
+    user = optional_user(request)
+    if user is not None:
+        return user
+    return {"sub": guest_sub(request), "email": None, "name": None, "picture": None}
+
+
 @app.post("/api/sessions")
 def start_session(payload: SessionStartRequest, request: Request) -> dict[str, Any]:
-    user = require_user(request)
+    user = practising_identity(request)
     store = get_store()
     # The row has to exist first: practice_sessions references delegates.
     store.upsert_delegate(user)
     session_id = store.create_session(user["sub"], payload.reps_target, payload.seconds_per_rep)
     # Play is a fresh "they are here now" signal, so the address list stays useful
-    # even for a delegate who signed in days ago.
+    # even for a delegate who signed in days ago — and it is the only way a guest
+    # ever gets a legible name in the developer view.
     try:
         store.record_ip(user["sub"], client_identifier(request))
     except Exception as error:  # noqa: BLE001
@@ -887,7 +912,7 @@ def start_session(payload: SessionStartRequest, request: Request) -> dict[str, A
 
 @app.patch("/api/sessions/{session_id}")
 def finish_session(session_id: str, payload: SessionFinishRequest, request: Request) -> dict[str, Any]:
-    user = require_user(request)
+    user = practising_identity(request)
     get_store().finish_session(
         user["sub"],
         _session_id(session_id),
@@ -901,7 +926,7 @@ def finish_session(session_id: str, payload: SessionFinishRequest, request: Requ
 
 @app.post("/api/sessions/{session_id}/reps")
 def add_rep(session_id: str, payload: RepRequest, request: Request) -> dict[str, Any]:
-    user = require_user(request)
+    user = practising_identity(request)
     store = get_store()
     owned = _session_id(session_id)
     # A rep belongs to its session, and a session belongs to one account. Without
@@ -1235,6 +1260,256 @@ def admin_user(user_sub: str, request: Request) -> dict[str, Any]:
         "user": user,
         "reps": reps,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Training-data export
+#
+# The dashboard is built for reading numbers; this is built for taking the
+# runs away. Every filter here is one a person assembling a fine-tuning set
+# actually reaches for: a date window, some delegates (or everyone but a few),
+# a mark band, and only the runs whose text was stored.
+# --------------------------------------------------------------------------- #
+EXPORT_FIELDS = (
+    "id",
+    "time",
+    "speech",
+    "answer",
+    "score",
+    "grade",
+    "reasoning",
+    "feedback",
+    "rewritten",
+    "topic",
+    "committee",
+    "delegate",
+    "sub",
+    "timing",
+    "tokens",
+    "excluded",
+)
+
+EXPORT_DEFAULT_FIELDS = [
+    "time",
+    "speech",
+    "answer",
+    "score",
+    "grade",
+    "reasoning",
+    "feedback",
+    "topic",
+    "committee",
+    "delegate",
+]
+
+
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    start: str | None = None
+    end: str | None = None
+    include: list[str] = []
+    exclude: list[str] = []
+    # Inclusive [low, high] mark ranges. Several are OR-ed: "7-10 and 1-3" is one
+    # export of the best and the worst, not two files to concatenate by hand.
+    bands: list[list[float]] = []
+    include_hidden: bool = False
+    only_with_text: bool = False
+    oldest_first: bool = True
+    dedupe: bool = False
+    fields: list[str] = []
+    format: str = "jsonl"
+    dry_run: bool = False
+
+
+def _export_cell(row: dict[str, Any], field: str) -> Any:
+    """One field of one run, already flattened to JSON-friendly values."""
+    if field == "time":
+        return row.get("created_at")
+    if field == "speech":
+        return row.get("speech") or ""
+    if field == "answer":
+        return row.get("answer") or ""
+    if field == "score":
+        return row.get("score")
+    if field == "grade":
+        return row.get("grade_label") or ""
+    if field == "reasoning":
+        return row.get("reasoning") or ""
+    if field == "feedback":
+        return row.get("feedback") or ""
+    if field == "rewritten":
+        return row.get("rewritten") or ""
+    if field == "timing":
+        return {
+            "write_ms": row.get("write_ms"),
+            "latency_ms": row.get("latency_ms"),
+            "seconds_per_rep": row.get("seconds_per_rep"),
+        }
+    if field == "tokens":
+        return {
+            "prompt": row.get("prompt_tokens"),
+            "completion": row.get("completion_tokens"),
+        }
+    return row.get(field)
+
+
+def _export_text(rows: list[dict[str, Any]], fmt: str, fields: list[str]) -> str:
+    """The file body for the chosen format. Plain text, no streaming."""
+    if fmt == "json":
+        # One array, indented: the shape a spreadsheet or a script can load whole.
+        records = [
+            {field: _export_cell(row, field) for field in fields} for row in rows
+        ]
+        return json.dumps(records, ensure_ascii=False, indent=2)
+
+    if fmt == "chat":
+        # Fine-tuning shape: the speech is the prompt, the POI is the completion,
+        # and the chair's mark rides along as metadata for filtering afterwards.
+        lines = []
+        for row in rows:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Model UN delegate writing a Point of Information. "
+                        "Given the speech on the floor, write one short, direct question "
+                        "that challenges or probes the speaker's argument."
+                    ),
+                },
+                {"role": "user", "content": row.get("speech") or ""},
+                {"role": "assistant", "content": row.get("answer") or ""},
+            ]
+            record: dict[str, Any] = {"messages": messages}
+            if row.get("score") is not None:
+                record["score"] = row["score"]
+            if row.get("topic"):
+                record["topic"] = row["topic"]
+            if row.get("created_at"):
+                record["created_at"] = row["created_at"]
+            lines.append(json.dumps(record, ensure_ascii=False))
+        return "\n".join(lines)
+
+    if fmt == "csv":
+        header = ",".join(fields)
+        lines = [header]
+        for row in rows:
+            cells = []
+            for field in fields:
+                value = _export_cell(row, field)
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value, ensure_ascii=False)
+                text = "" if value is None else str(value)
+                text = text.replace("\r", " ").replace("\n", " ")
+                cells.append(f'"{text.replace(chr(34), chr(34) * 2)}"')
+            lines.append(",".join(cells))
+        return "\n".join(lines)
+
+    if fmt == "tsv":
+        # Tabs are the format a spreadsheet pastes into cleanly when the text
+        # itself holds commas — which answers and chair notes always do.
+        lines = ["\t".join(fields)]
+        for row in rows:
+            cells = []
+            for field in fields:
+                value = _export_cell(row, field)
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value, ensure_ascii=False)
+                text = "" if value is None else str(value)
+                cells.append(text.replace("\r", " ").replace("\n", " ").replace("\t", " "))
+            lines.append("\t".join(cells))
+        return "\n".join(lines)
+
+    if fmt == "txt":
+        chunks = []
+        for row in rows:
+            parts = []
+            if row.get("topic"):
+                parts.append(f"# {row['topic']}")
+            if "speech" in fields and row.get("speech"):
+                parts.append(row["speech"])
+                parts.append("")
+            if row.get("answer"):
+                parts.append(row["answer"])
+            chunks.append("\n".join(parts).strip())
+        return "\n\n---\n\n".join(chunks)
+
+    lines = []
+    for row in rows:
+        record = {field: _export_cell(row, field) for field in fields}
+        lines.append(json.dumps(record, ensure_ascii=False))
+    return "\n".join(lines)
+
+
+@app.post("/api/admin/export")
+def admin_export(payload: ExportRequest, request: Request) -> dict[str, Any]:
+    """Admin only: the runs themselves, as a file for training on."""
+    require_admin(request)
+    fmt = payload.format if payload.format in {"json", "jsonl", "chat", "csv", "tsv", "txt"} else "jsonl"
+    fields = [field for field in payload.fields if field in EXPORT_FIELDS] or EXPORT_DEFAULT_FIELDS
+    start, end = _admin_window(30, payload.start, payload.end)
+
+    store = get_store()
+    try:
+        rows = store.admin_export_rows(
+            start=start,
+            end=end,
+            include=payload.include,
+            exclude=payload.exclude,
+            bands=[
+                (float(band[0]), float(band[1]))
+                for band in payload.bands
+                if isinstance(band, list) and len(band) == 2
+            ],
+            include_hidden=payload.include_hidden,
+            only_with_text=payload.only_with_text,
+            oldest_first=payload.oldest_first,
+        )
+    except Exception as error:  # noqa: BLE001 - a broken read is a 503, not a 500
+        logger.error("Export failed: %s", type(error).__name__)
+        raise HTTPException(
+            status_code=503, detail={"message": "The export could not be read.", "code": "export"}
+        ) from error
+
+    # Committee and delegation belong to the speech, not to the run: the dataset
+    # is the only place that knows them, the same lookup the replay page uses.
+    index = speech_index()
+    for row in rows:
+        source = index.get(row.get("drill_id") or "") or {}
+        row["committee"] = source.get("committee") or ""
+        if not row.get("delegate"):
+            row["delegate"] = source.get("country") or ""
+
+    if payload.dedupe:
+        seen = set()
+        unique = []
+        for row in rows:
+            key = (row.get("speech") or "", row.get("answer") or "", row.get("score"))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        rows = unique
+
+    text = _export_text(rows, fmt, fields)
+    stamp = start.date().isoformat()
+    extension = {
+        "json": "json",
+        "jsonl": "jsonl",
+        "chat": "jsonl",
+        "csv": "csv",
+        "tsv": "tsv",
+        "txt": "txt",
+    }[fmt]
+    return {
+        "count": len(rows),
+        "bytes": len(text.encode("utf-8")),
+        "filename": f"writeitout-{fmt}-{stamp}-{end.date().isoformat()}.{extension}",
+        "text": "" if payload.dry_run else text,
+        "dry_run": bool(payload.dry_run),
+        "fields": fields,
+        "format": fmt,
     }
 
 
