@@ -104,6 +104,13 @@ alter table reps add column if not exists write_ms integer;
 -- (a test run, a joke answer, a duplicate). Excluded rows stay readable in God
 -- Mode so they can be put back; `store.py` filters every aggregate with it.
 alter table reps add column if not exists excluded boolean not null default false;
+-- "The chair got this one wrong": a delegate marks a run, and the developer can
+-- pull exactly those runs out of the export and reread them. It is a signal, not
+-- a switch — it changes no number.
+alter table reps add column if not exists flagged boolean not null default false;
+-- A delegate who flags everything for fun can be stopped from flagging, one
+-- account at a time, from their drawer on #/admin.
+alter table delegates add column if not exists flag_banned boolean not null default false;
 
 -- Product analytics. Written by the batched ingest endpoint; rolled up nightly.
 create table if not exists events (

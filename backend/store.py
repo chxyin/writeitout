@@ -109,6 +109,7 @@ def _export_row(row: Any) -> dict[str, Any]:
         "seconds_per_rep": int(row.get("seconds_per_rep") or 0),
         "session_completed": bool(row.get("session_completed")),
         "excluded": bool(row.get("excluded")),
+        "flagged": bool(row.get("flagged")),
     }
 
 
@@ -248,6 +249,7 @@ class Store:
         bands: Iterable[tuple[float, float]] = (),
         include_hidden: bool = False,
         only_with_text: bool = False,
+        flagged_only: bool = False,
         oldest_first: bool = True,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
@@ -270,6 +272,20 @@ class Store:
 
     def admin_delete_rep(self, rep_id: str) -> bool:
         """Remove one run for good. False when there was nothing to remove."""
+        raise NotImplementedError
+
+    def flag_rep(self, sub: str, rep_id: str) -> dict[str, Any] | None:
+        """A delegate marks one of their own runs as a suspected grading error.
+
+        Returns `None` when the run is not theirs, `{"flagged": False, "banned":
+        True}` when the account is barred from flagging, and the marked state
+        otherwise. Flagging changes no number — it is a list to reread, not a
+        correction.
+        """
+        raise NotImplementedError
+
+    def set_flag_ban(self, sub: str, banned: bool) -> bool:
+        """Stop (or re-allow) one account flagging runs."""
         raise NotImplementedError
 
     # -- telemetry ---------------------------------------------------------- #
@@ -598,6 +614,8 @@ class MemoryStore(Store):
             "last_seen_at": _iso(delegate.get("last_seen_at")),
             "last_practice_on": _iso(delegate.get("last_practice_on")),
             "store_answers": bool(delegate.get("store_answers", True)),
+            "flag_banned": bool(delegate.get("flag_banned")),
+            "flagged_reps": len([r for r in reps if r.get("flagged")]),
             "reps": len(reps),
             "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
             "best_score": (
@@ -631,6 +649,7 @@ class MemoryStore(Store):
         bands: Iterable[tuple[float, float]] = (),
         include_hidden: bool = False,
         only_with_text: bool = False,
+        flagged_only: bool = False,
         oldest_first: bool = True,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
@@ -660,6 +679,8 @@ class MemoryStore(Store):
             if not include_hidden and rep.get("excluded"):
                 continue
             if only_with_text and not (rep.get("poi") or ""):
+                continue
+            if flagged_only and not rep.get("flagged"):
                 continue
             session = sessions.get(str(rep.get("session_id"))) or {}
             delegate = delegates.get(sub) or {}
@@ -760,6 +781,25 @@ class MemoryStore(Store):
                 return False
             sub = rep["user_sub"]
         self._recount(sub)
+        return True
+
+    def flag_rep(self, sub: str, rep_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            delegate = self._delegates.get(sub)
+            if delegate is not None and delegate.get("flag_banned"):
+                return {"flagged": False, "banned": True}
+            rep = self._reps.get(rep_id)
+            if rep is None or rep.get("user_sub") != sub:
+                return None
+            rep["flagged"] = True
+        return {"flagged": True, "banned": False}
+
+    def set_flag_ban(self, sub: str, banned: bool) -> bool:
+        with self._lock:
+            delegate = self._delegates.get(sub)
+            if delegate is None:
+                return False
+            delegate["flag_banned"] = bool(banned)
         return True
 
     def admin_stats(self, start: datetime, end: datetime) -> dict[str, Any]:
@@ -882,6 +922,14 @@ class MemoryStore(Store):
                         if r["user_sub"] == delegate.get("user_sub") and r.get("excluded")
                     ]
                 ),
+                "flagged_reps": len(
+                    [
+                        r
+                        for r in reps
+                        if r["user_sub"] == delegate.get("user_sub") and r.get("flagged")
+                    ]
+                ),
+                "flag_banned": bool(delegate.get("flag_banned")),
                 "guest": is_guest(str(delegate.get("user_sub") or "")),
             }
             for delegate in busiest
@@ -1512,8 +1560,8 @@ class PostgresStore(Store):
             row = conn.execute(
                 """
                 select user_sub, email, display_name, picture_url, store_answers,
-                       created_at, last_seen_at, last_practice_on, best_score,
-                       total_active_seconds
+                       flag_banned, created_at, last_seen_at, last_practice_on,
+                       best_score, total_active_seconds
                 from delegates where user_sub = %s
                 """,
                 (sub,),
@@ -1525,7 +1573,8 @@ class PostgresStore(Store):
                 select count(*) as reps,
                        coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                        coalesce(sum(completion_tokens), 0) as completion_tokens,
-                       avg(score) as avg_score
+                       avg(score) as avg_score,
+                       count(*) filter (where flagged) as flagged_reps
                 from reps where user_sub = %s
                 """,
                 (sub,),
@@ -1548,6 +1597,8 @@ class PostgresStore(Store):
             "last_seen_at": _iso(row.get("last_seen_at")),
             "last_practice_on": _iso(row.get("last_practice_on")),
             "store_answers": bool(row.get("store_answers")),
+            "flag_banned": bool(row.get("flag_banned")),
+            "flagged_reps": int(totals.get("flagged_reps") or 0),
             "reps": int(totals["reps"] or 0),
             "avg_score": (
                 round(float(totals["avg_score"]), 2)
@@ -1608,6 +1659,29 @@ class PostgresStore(Store):
         self.recount_delegate(row["user_sub"])
         return True
 
+    def flag_rep(self, sub: str, rep_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            delegate = conn.execute(
+                "select flag_banned from delegates where user_sub = %s", (sub,)
+            ).fetchone()
+            if delegate is not None and delegate["flag_banned"]:
+                return {"flagged": False, "banned": True}
+            row = conn.execute(
+                "update reps set flagged = true where id = %s and user_sub = %s returning id",
+                (rep_id, sub),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"flagged": True, "banned": False}
+
+    def set_flag_ban(self, sub: str, banned: bool) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "update delegates set flag_banned = %s where user_sub = %s returning user_sub",
+                (banned, sub),
+            ).fetchone()
+        return row is not None
+
     def recount_delegate(self, sub: str) -> None:
         """Rebuild the delegate's counters from the runs that still count."""
         with self._conn() as conn:
@@ -1636,6 +1710,7 @@ class PostgresStore(Store):
         bands: Iterable[tuple[float, float]] = (),
         include_hidden: bool = False,
         only_with_text: bool = False,
+        flagged_only: bool = False,
         oldest_first: bool = True,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
@@ -1666,6 +1741,8 @@ class PostgresStore(Store):
             clauses.append("not r.excluded")
         if only_with_text:
             clauses.append("r.poi is not null and r.poi <> ''")
+        if flagged_only:
+            clauses.append("r.flagged")
         where = " and ".join(clauses)
         order = "asc" if oldest_first else "desc"
 
@@ -1676,7 +1753,7 @@ class PostgresStore(Store):
                        r.poi, r.poi_chars, r.prompt_text, r.grade_label, r.reasoning,
                        r.constructive_feedback, r.rewritten_poi, r.rewrite_explanation,
                        r.latency_ms, r.write_ms, r.prompt_tokens, r.completion_tokens,
-                       r.model, r.created_at, r.excluded, r.user_sub,
+                       r.model, r.created_at, r.excluded, r.flagged, r.user_sub,
                        d.email, d.display_name,
                        coalesce(s.seconds_per_rep, 0) as seconds_per_rep,
                        coalesce(s.completed, false) as session_completed
@@ -1734,6 +1811,7 @@ class PostgresStore(Store):
                 "model": row.get("model") or "",
                 "seconds_per_rep": int(row.get("seconds_per_rep") or 0),
                 "excluded": bool(row.get("excluded")),
+        "flagged": bool(row.get("flagged")),
                 "session_completed": bool(row.get("session_completed")),
             }
             for row in rows
@@ -1917,6 +1995,11 @@ class PostgresStore(Store):
                        -- the count rather than added to it — "9 runs, 2 hidden".
                        (select count(*) from reps r
                         where r.user_sub = d.user_sub and r.excluded) as excluded_reps,
+                       -- Runs the delegate says the chair got wrong, and whether
+                       -- they are still allowed to say so.
+                       (select count(*) from reps r
+                        where r.user_sub = d.user_sub and r.flagged) as flagged_reps,
+                       d.flag_banned,
                        -- Time on app, from the visible-minute heartbeats.
                        (select count(*) from activity_ticks t
                         where t.user_sub = d.user_sub) * 60 as active_seconds
@@ -2150,6 +2233,8 @@ class PostgresStore(Store):
                     "ip": row.get("ip") or "",
                     "active_seconds": whole(row.get("active_seconds")),
                     "excluded_reps": whole(row.get("excluded_reps")),
+                    "flagged_reps": whole(row.get("flagged_reps")),
+                    "flag_banned": bool(row.get("flag_banned")),
                     "guest": is_guest(str(row.get("user_sub") or "")),
                 }
             )

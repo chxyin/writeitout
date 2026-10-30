@@ -47,7 +47,13 @@ export default function FeedbackCard({
   frozen = false,
   backLabel = '← Back',
   nextLabel = 'Next run →',
-  nextDisabled = false
+  nextDisabled = false,
+  // "The chair got this one wrong." The flag changes no number; it marks the run
+  // so the developer can pull exactly the disputed ones out of the export.
+  onFlag = null,
+  flagged = false,
+  flagSaving = false,
+  flagError = ''
 }) {
   const [copied, setCopied] = useState(false);
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal);
@@ -124,6 +130,26 @@ export default function FeedbackCard({
           />
         )}
         <div className="feedback-actions">
+          {onFlag && (
+            <div className="flag-row">
+              {flagged ? (
+                <span className="flag-done">Flagged — the developer will reread this one.</span>
+              ) : (
+                <button
+                  type="button"
+                  className="flag-btn"
+                  onClick={onFlag}
+                  disabled={flagSaving}
+                  title="If you think the chair graded this unfairly, flag it for review"
+                >
+                  {flagSaving ? 'Flagging…' : '⚑ Flag AI error'}
+                </button>
+              )}
+              {flagError && (
+                <span className="flag-error" role="alert">{flagError}</span>
+              )}
+            </div>
+          )}
           <button className="back-btn" type="button" onClick={onBack}>
             {backLabel}
           </button>

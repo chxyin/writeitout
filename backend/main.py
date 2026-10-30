@@ -1024,6 +1024,43 @@ def rate_session(session_id: str, payload: RatingRequest, request: Request) -> d
     return {"ok": True}
 
 
+@app.post("/api/reps/{rep_id}/flag")
+def flag_rep(rep_id: str, request: Request) -> dict[str, Any]:
+    """The delegate says the chair got this run wrong.
+
+    It changes no number — the mark stands until a developer looks — but the run
+    is marked so the export panel can pull exactly the disputed ones. The account
+    has to own the run, and an account a developer has stopped from flagging gets
+    a 403 rather than silently doing nothing.
+    """
+    user = practising_identity(request)
+    result = get_store().flag_rep(user["sub"], rep_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Unknown run.")
+    if result["banned"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Flagging is turned off for this account.",
+        )
+    return {"ok": True, "flagged": True}
+
+
+class FlagBanRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    flag_banned: bool
+
+
+@app.patch("/api/admin/users/{user_sub}")
+def admin_users_patch(user_sub: str, payload: FlagBanRequest, request: Request) -> dict[str, Any]:
+    """Admin only: stop (or re-allow) one account using the flag button."""
+    require_admin(request)
+    store = get_store()
+    if not store.set_flag_ban(user_sub, payload.flag_banned):
+        raise HTTPException(status_code=404, detail="Unknown delegate.")
+    return {"ok": True, "flag_banned": payload.flag_banned}
+
+
 @app.post("/api/activity")
 def activity(payload: ActivityRequest, request: Request) -> dict[str, Any]:
     """One visible minute on the app. The client sends this from a timer that is
@@ -1288,6 +1325,7 @@ EXPORT_FIELDS = (
     "timing",
     "tokens",
     "excluded",
+    "flagged",
 )
 
 EXPORT_DEFAULT_FIELDS = [
@@ -1316,6 +1354,7 @@ class ExportRequest(BaseModel):
     bands: list[list[float]] = []
     include_hidden: bool = False
     only_with_text: bool = False
+    flagged_only: bool = False
     oldest_first: bool = True
     dedupe: bool = False
     fields: list[str] = []
@@ -1341,6 +1380,8 @@ def _export_cell(row: dict[str, Any], field: str) -> Any:
         return row.get("feedback") or ""
     if field == "rewritten":
         return row.get("rewritten") or ""
+    if field == "flagged":
+        return bool(row.get("flagged"))
     if field == "timing":
         return {
             "write_ms": row.get("write_ms"),
@@ -1464,6 +1505,7 @@ def admin_export(payload: ExportRequest, request: Request) -> dict[str, Any]:
             ],
             include_hidden=payload.include_hidden,
             only_with_text=payload.only_with_text,
+            flagged_only=payload.flagged_only,
             oldest_first=payload.oldest_first,
         )
     except Exception as error:  # noqa: BLE001 - a broken read is a 503, not a 500

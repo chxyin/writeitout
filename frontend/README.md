@@ -259,8 +259,9 @@ is a question someone assembling a fine-tuning set asks:
 - **Fields** — what goes in the file: when, speech, their POI, score, the chair's
   label/reasoning/advice, the model rewrite, topic, committee, delegation,
   account id, writing time, tokens, the excluded flag.
-- **Options** — only runs whose answers were stored (on by default), include
-  excluded runs, oldest first, and drop duplicate (speech, answer) pairs.
+- **Options** — only runs whose answers were stored (on by default), only runs a
+  delegate flagged, include excluded runs, oldest first, and drop duplicate
+  (speech, answer) pairs.
 - **Format** — JSON (one indented array), JSONL (one object per line), Chat (the
   `messages` shape for fine-tuning a POI writer), CSV, TSV, or plain Text.
 - **Preview count** runs the same query and reports the run count and file size
@@ -271,6 +272,23 @@ browser saves it as a Blob, so no export is stored on the server and none is
 mailed anywhere. The response is capped at 5,000 rows (the store accepts up to
 20,000) — well under the function's body limit, and a training set bigger than
 that wants to be built in date slices anyway.
+
+## Flagging a bad grade
+
+The feedback card carries a quiet **⚑ Flag AI error** button. Pressing it sets
+`reps.flagged` through `POST /api/reps/{id}/flag` and changes nothing else: the
+mark stands, the averages do not move, and the run stays where it is. It is a
+reading list for the developer, not a correction — the export panel's *Only runs
+flagged by a delegate* filter is how that list is opened.
+
+The endpoint only accepts a run the caller owns (guest identity included) and
+answers 404 for anything else. An account a developer has stopped from flagging
+gets a 403, and the card says so instead of pretending the flag worked.
+
+That stop switch is in the delegate drawer: **Ban this account from flagging AI
+errors** (`delegates.flag_banned`, `PATCH /api/admin/users/{sub}`). It exists for
+the delegate who flags every run for fun, which is noise in the list rather than
+a signal.
 
 ## Trial mode
 

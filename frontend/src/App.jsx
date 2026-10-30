@@ -27,6 +27,7 @@ import {
   flushSessionOnHide,
   importLocalHistory,
   fetchTrialState,
+  flagRep,
   rateSession,
   recordRep,
   repId,
@@ -720,10 +721,13 @@ export default function App() {
       // when the drill arrived), so grading fills that slot instead of appending
       // a duplicate — history never holds two versions of the same rep. The
       // timeout flag is kept with the entry so the card can say why it stopped.
+      // The rep id is minted here and kept on the entry, because "flag this run"
+      // needs the same id the recorder posts.
+      const entryRepId = repId();
       setHistory((entries) =>
         entries.map((entry, index) =>
           index === currentIndex
-            ? { drill: currentDrill, poi, feedback: data, timedOut: clockExpired }
+            ? { drill: currentDrill, poi, feedback: data, timedOut: clockExpired, repId: entryRepId }
             : entry
         )
       );
@@ -738,10 +742,11 @@ export default function App() {
 
       // Persist the rep while the cost trail is still in hand. The recorder queues
       // it if the session row is still being created. Fire-and-forget: the
-      // delegate has their feedback whether or not the write lands.
-      if (session) {
-        recordRep({
-          id: repId(),
+      // delegate has their feedback whether or not the write lands. Guests are
+      // recorded too — the server files them under the address-derived key, and
+      // practice nobody can see is practice the dashboard pretends never happened.
+      recordRep({
+        id: entryRepId,
           drill_id: String(currentDrill.id || currentDrill.topic || 'unknown'),
           topic: currentDrill.topic || null,
           mode: mode === 'single' ? 'single' : 'full',
@@ -771,7 +776,6 @@ export default function App() {
           completion_tokens: data.usage?.completion_tokens ?? null,
           model: data.usage?.model ?? null
         });
-      }
 
       setFormExiting(true);
       if (exitTimer.current) clearTimeout(exitTimer.current);
@@ -924,7 +928,7 @@ export default function App() {
     setSubmitError('');
     loadFirstRep();
     // A new run out of the completion screen opens a new row.
-    if (session && gameSettings) beginPracticeSession(gameSettings);
+    if (gameSettings) beginPracticeSession(gameSettings);
   };
 
   // Play: remember the numbers, open the drill, and open the server-side row the
@@ -941,7 +945,7 @@ export default function App() {
     setGameSettings(next);
     persistLastSession(next);
     setCurrentView('game');
-    if (session) beginPracticeSession(next);
+    beginPracticeSession(next);
   };
 
   // "Exit Task" leaves the drill for the splash. It ALWAYS closes the session:
@@ -1031,6 +1035,32 @@ export default function App() {
   const handlePoiChange = (value) => {
     setPoi(value);
     if (submitError) setSubmitError('');
+  };
+
+  // "The chair got this one wrong" — per-run, kept in memory for the session.
+  // The flag lives on the server once it lands; this only decides whether the
+  // button still reads as pressable.
+  const [flaggedReps, setFlaggedReps] = useState(() => new Set());
+  const [flagSaving, setFlagSaving] = useState(false);
+  const [flagError, setFlagError] = useState('');
+
+  const handleFlag = async () => {
+    const entry = history[currentIndex];
+    const targetId = entry && entry.repId;
+    if (!targetId || flagSaving) return;
+    setFlagSaving(true);
+    setFlagError('');
+    const result = await flagRep(targetId);
+    setFlagSaving(false);
+    if (!result.ok) {
+      setFlagError(
+        result.status === 403
+          ? 'Flagging is turned off for this account.'
+          : result.message
+      );
+      return;
+    }
+    setFlaggedReps((current) => new Set(current).add(targetId));
   };
 
   const getScoreColor = (score) => {
@@ -1295,6 +1325,10 @@ export default function App() {
             historyLength={history.length}
             initialShowOriginal={currentIndex < history.length - 1}
             timedOut={Boolean(currentEntry?.timedOut)}
+            onFlag={currentEntry?.repId ? handleFlag : null}
+            flagged={Boolean(currentEntry?.repId && flaggedReps.has(currentEntry.repId))}
+            flagSaving={flagSaving}
+            flagError={flagError}
           />
         )}
       </div>

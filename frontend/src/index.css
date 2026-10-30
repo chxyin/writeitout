@@ -2401,6 +2401,61 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   color: rgba(255, 255, 255, 0.6);
 }
 
+/* ---------- Flag an AI error ----------
+   Deliberately quiet: a delegate should find it when they disagree, not be
+   nudged into pressing it on every run. It sits left of Back/Next. */
+.flag-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-right: auto;
+}
+.flag-btn {
+  padding: 0.35rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.78);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.flag-btn:hover:not(:disabled) {
+  background: rgba(255, 149, 0, 0.18);
+  border-color: var(--accent-orange);
+  color: #fff;
+}
+.flag-btn:disabled { opacity: 0.6; cursor: default; }
+.flag-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.flag-done { font-size: 0.72rem; font-weight: 700; color: #6BE38C; }
+.flag-error { font-size: 0.68rem; color: #FF8A80; }
+
+/* The flag ban in the delegate drawer. */
+.user-drawer-ban {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.7rem 0 0.2rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 149, 0, 0.28);
+  background: rgba(255, 149, 0, 0.08);
+  cursor: pointer;
+}
+.user-drawer-ban input {
+  width: 16px;
+  height: 16px;
+  margin: 0.15rem 0 0;
+  accent-color: var(--accent-orange);
+  cursor: pointer;
+}
+.user-drawer-ban span { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.user-drawer-ban b { font-size: 0.76rem; font-weight: 700; color: #fff; }
+.user-drawer-ban small { font-size: 0.68rem; line-height: 1.4; color: rgba(255, 255, 255, 0.55); }
+
 /* ---------- A clickable table row (opens a delegate) ---------- */
 .stats-table-row.is-clickable {
   width: 100%;

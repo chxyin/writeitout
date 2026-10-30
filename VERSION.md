@@ -1,5 +1,18 @@
 # Versions
 
+## Version 1.5 - Flagged Runs
+
+- **⚑ Flag AI error** on the feedback card: a delegate marks a run the chair got
+  wrong. It changes no number — the run is marked (`reps.flagged`) and the export
+  panel can pull exactly those runs with *Only runs flagged by a delegate*.
+- **Ban an account from flagging** from the delegate drawer
+  (`delegates.flag_banned`), for the delegate who flags everything for fun. The
+  API refuses their flags with a 403 and the card says so.
+- **Anonymous practice is now actually written.** The browser was only recording
+  runs for signed-in accounts, so the guest attribution added in v1.4 had nothing
+  to attribute; sessions and runs are now recorded for guests too.
+- Export gained **JSON** and **TSV** alongside JSONL / Chat / CSV / Text.
+
 ## Version 1.4 - Charts, Anonymous Visitors and a Training Export
 
 Builds on v1.3. The developer view becomes something you can read three ways and

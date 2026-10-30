@@ -151,6 +151,22 @@ export async function exportRuns(body) {
   }
 }
 
+/** Stop (or re-allow) one account using the "Flag AI error" button. */
+export async function patchFlagBan(sub, banned) {
+  try {
+    return {
+      ok: true,
+      data: await api.patch(`/api/admin/users/${encodeURIComponent(sub)}`, { flag_banned: banned })
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: (error && error.code) || null,
+      message: (error && error.message) || 'That change was refused.'
+    };
+  }
+}
+
 /** The dashboard's own table, as a spreadsheet. */
 export function downloadSummaryCsv(delegates, stamp) {
   download(

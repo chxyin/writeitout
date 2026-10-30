@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAdminUser, downloadRepsCsv, formatErrorCode, patchRep, deleteRep } from '../lib/stats.js';
+import { fetchAdminUser, downloadRepsCsv, formatErrorCode, patchRep, patchFlagBan, deleteRep } from '../lib/stats.js';
 
 /** 1,234 → "1,234"; missing → "—". */
 function count(value) {
@@ -244,6 +244,22 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // The flag ban is a delegate-level switch, not a run-level one, so it has its
+  // own busy flag rather than sharing the per-run one.
+  const [banBusy, setBanBusy] = useState(false);
+
+  const setFlagBan = async (banned) => {
+    setBanBusy(true);
+    setActionError('');
+    const result = await patchFlagBan(sub, banned);
+    setBanBusy(false);
+    if (!result.ok) {
+      setActionError(result.code ? `${result.message} (${result.code})` : result.message);
+      return;
+    }
+    setToken((current) => current + 1);
+    if (onChanged) onChanged();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -449,7 +465,33 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
                   {guest ? 'never for guests' : user.store_answers ? 'yes' : 'opted out'}
                 </span>
               </div>
+              <div className="stats-fact">
+                <span className="stats-fact-label">Flagged runs</span>
+                <span className="stats-fact-value is-small">
+                  {count(user.flagged_reps || 0)}
+                </span>
+              </div>
             </div>
+
+            {/* Flagging is the one delegate control a developer can turn off: a
+                joke flagger is noise in the export, and the box says which way
+                round it is. */}
+            <label className="user-drawer-ban">
+              <input
+                type="checkbox"
+                checked={Boolean(user.flag_banned)}
+                disabled={banBusy}
+                onChange={(event) => setFlagBan(event.currentTarget.checked)}
+              />
+              <span>
+                <b>Ban this account from flagging AI errors</b>
+                <small>
+                  {user.flag_banned
+                    ? 'The Flag AI error button is refused for this account.'
+                    : 'Allowed to flag runs for review.'}
+                </small>
+              </span>
+            </label>
 
             <section className="user-drawer-ips">
               <h3 className="stats-panel-title">Addresses</h3>

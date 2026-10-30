@@ -27,7 +27,8 @@ const FIELD_CHOICES = [
   { id: 'sub', label: 'Account id' },
   { id: 'timing', label: 'Writing time' },
   { id: 'tokens', label: 'Tokens' },
-  { id: 'excluded', label: 'Excluded flag' }
+  { id: 'excluded', label: 'Excluded flag' },
+  { id: 'flagged', label: 'Flagged by delegate' }
 ];
 
 const DEFAULT_FIELDS = [
@@ -85,6 +86,7 @@ export default function ExportPanel({ delegates = [], defaultStart = '', default
   const [fields, setFields] = useState(() => new Set(DEFAULT_FIELDS));
   const [includeHidden, setIncludeHidden] = useState(false);
   const [onlyWithText, setOnlyWithText] = useState(true);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [oldestFirst, setOldestFirst] = useState(true);
   const [dedupe, setDedupe] = useState(false);
   const [format, setFormat] = useState('jsonl');
@@ -137,6 +139,7 @@ export default function ExportPanel({ delegates = [], defaultStart = '', default
     bands,
     include_hidden: includeHidden,
     only_with_text: onlyWithText,
+    flagged_only: flaggedOnly,
     oldest_first: oldestFirst,
     dedupe,
     fields: [...fields],
@@ -368,6 +371,7 @@ export default function ExportPanel({ delegates = [], defaultStart = '', default
         <div className="export-chips">
           {[
             { on: onlyWithText, set: setOnlyWithText, label: 'Only runs whose answers were stored' },
+            { on: flaggedOnly, set: setFlaggedOnly, label: 'Only runs flagged by a delegate' },
             { on: includeHidden, set: setIncludeHidden, label: 'Include excluded runs' },
             { on: oldestFirst, set: setOldestFirst, label: 'Oldest first' },
             { on: dedupe, set: setDedupe, label: 'Drop duplicate (speech, answer) pairs' }

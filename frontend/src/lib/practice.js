@@ -130,6 +130,27 @@ export async function beginPracticeSession(settings) {
   return id;
 }
 
+/**
+ * "The chair got this one wrong." It changes no number — the run is marked so
+ * the developer can pull exactly the disputed ones out of the export and reread
+ * them. An account a developer has silenced gets a 403, which is a message and
+ * not a silent no-op.
+ */
+export async function flagRep(repId) {
+  if (!repId) return { ok: false, message: 'This run has no id to flag.' };
+  try {
+    await api.post(`/api/reps/${encodeURIComponent(repId)}/flag`, {});
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      status: error && error.status ? error.status : 0,
+      code: (error && error.code) || null,
+      message: (error && error.message) || 'That flag could not be saved.'
+    };
+  }
+}
+
 /** Record one graded rep. Queued while the row id is still in flight. */
 export function recordRep(rep) {
   progress.repsDone += 1;
