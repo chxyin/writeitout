@@ -31,6 +31,13 @@ same verified profile for a `Bearer` token.
 to GitHub Pages. It fires on `main` and on `master`, because the repository's
 branch was renamed and a stale clone may still push the old name.
 
+**The backend is on Vercel, and its production branch is `master`.** A push to
+`main` alone updates the site but leaves the API on the previous build — the
+frontend then quietly loses whatever the old API does not return. Push both:
+`git push origin HEAD:main; git push origin HEAD:master`. You can tell which API
+is live from `https://writeitout-backend.vercel.app/openapi.json`: the request
+models there list every field the deployed code accepts.
+
 The Pages site must be set to **Settings → Pages → Source: GitHub Actions**. With
 the older "Deploy from a branch" source, GitHub publishes the branch's own folder
 — which has no `index.html` at the root — and the whole site turns into a 404
