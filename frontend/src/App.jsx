@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SettingsMenu from './components/SettingsMenu.jsx';
-import { BACKGROUND_IDS } from './lib/appearance.js';
+import { BACKGROUND_IDS, NIGHT_HUE_RANGE } from './lib/appearance.js';
 import { DEFAULT_ZOOM, clampZoom } from './lib/zoom.js';
 import {
   TOP_OFFSET_RANGE,
@@ -122,6 +122,10 @@ const DEFAULT_SETTINGS = {
   showTopic: true,
   showComm: true,
   lowIntensity: false,
+  // Night light ships on: it is the setting a delegate practising late wants
+  // before they know it exists, and the switch is one press away in Settings.
+  nightLight: true,
+  nightHue: NIGHT_HUE_RANGE.default,
   theme: 'default',
   background: 'grid',
   zoom: DEFAULT_ZOOM,
@@ -152,6 +156,10 @@ function loadSettings() {
     showTopic: Boolean(parsed.showTopic ?? DEFAULT_SETTINGS.showTopic),
     showComm: Boolean(parsed.showComm ?? DEFAULT_SETTINGS.showComm),
     lowIntensity: Boolean(parsed.lowIntensity ?? DEFAULT_SETTINGS.lowIntensity),
+    // Absent means "never chosen", and the default is on — `?? true`, not
+    // `Boolean(undefined)` which would silently ship it off.
+    nightLight: Boolean(parsed.nightLight ?? DEFAULT_SETTINGS.nightLight),
+    nightHue: clampValue(parsed.nightHue, NIGHT_HUE_RANGE),
     theme: typeof parsed.theme === 'string' ? parsed.theme : DEFAULT_SETTINGS.theme,
     // A background whose swatch has been removed (the old Glow) falls back to the
     // default instead of leaving <body> with a class nothing in index.css styles.
@@ -342,7 +350,8 @@ export default function App() {
   // written back on every change so the app opens the way it was left.
   const [showMenu, setShowMenu] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
-  const { animOn, showTopic, showComm, theme, background, lowIntensity, zoom } = settings;
+  const { animOn, showTopic, showComm, theme, background, lowIntensity, zoom, nightLight, nightHue } =
+    settings;
   // Settings → Formatting: four free-running layout numbers, carried to CSS as
   // the --fmt-* custom properties below.
   const { topOffset, bottomOffset, textSize, cardWidth } = settings;
@@ -547,7 +556,15 @@ export default function App() {
     if (!showComm) document.body.classList.add('hide-comm');
     document.body.classList.add(`background-${background}`);
     if (lowIntensity) document.body.classList.add('low-intensity');
-  }, [theme, background, lowIntensity, animOn, showTopic, showComm]);
+    if (nightLight) document.body.classList.add('night-light');
+  }, [theme, background, lowIntensity, animOn, showTopic, showComm, nightLight]);
+
+  // The warm cast's colour. It rides on a custom property so moving the slider
+  // does not have to re-run the body-class effect, and so the filter in
+  // index.css has one number to read rather than a class per hue.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--night-hue', String(nightHue));
+  }, [nightHue]);
 
   useEffect(() => {
     persistSettings(settings);
@@ -1054,6 +1071,10 @@ export default function App() {
       onShowCommToggle={() => updateSetting('showComm', !showComm)}
       lowIntensity={lowIntensity}
       onLowIntensityToggle={() => updateSetting('lowIntensity', !lowIntensity)}
+      nightLight={nightLight}
+      onNightLightToggle={() => updateSetting('nightLight', !nightLight)}
+      nightHue={nightHue}
+      onNightHueChange={(value) => updateSetting('nightHue', value)}
       theme={theme}
       onThemeChange={(value) => updateSetting('theme', value)}
       background={background}

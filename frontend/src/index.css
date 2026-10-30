@@ -117,6 +117,42 @@ body.low-intensity .paper-container { opacity: 0.28; }
 body.low-intensity .prompt-card { backdrop-filter: none; }
 body.low-intensity .paper { animation-duration: 34s !important; box-shadow: none; }
 
+/* ---------- Night light ----------
+   A pane over the whole app that filters whatever is painted beneath it. The
+   obvious alternative — a filter on <html> or #root — turns that element into the
+   containing block for every `position: fixed` overlay (the settings panel's
+   scrim, the delegate drawer, the trial gate), so those would scroll with the
+   page instead of pinning to the screen. A backdrop filter tints without
+   touching layout, and because it is the last thing in the document it covers
+   the drawers and the time's-up veil as well.
+
+   Sepia is what makes the cast warm: it collapses everything towards amber, and
+   the rotation below moves that amber between orange and lemon, which is the one
+   number Settings exposes. The strength is fixed — a half-warm screen is neither
+   one thing nor the other — and the 0.05 tint on top keeps large dark areas from
+   going grey under the filter alone. */
+body.night-light::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background: hsl(var(--night-hue, 45) 100% 50% / 0.05);
+  /* Written unprefixed on purpose: the build adds the -webkit- alias itself
+     (Safari needs it), but when both are written by hand it keeps only the
+     alias — and Chrome ignores the prefixed name, so the feature vanished.
+     Strength is 0.9 rather than 1: a full sepia is a monochrome photograph,
+     and the PLAY button stops reading as a button against the pages behind it. */
+  backdrop-filter: sepia(0.9) saturate(2.5) hue-rotate(calc(var(--night-hue, 45) * 1deg - 38deg))
+    brightness(1.02);
+}
+
+/* Printing a page through the filter wastes the ink and hides the tint anyway;
+   a printed sheet is already as warm as it is going to get. */
+@media print {
+  body.night-light::after { display: none; }
+}
+
 .paper-container {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; overflow: hidden;
   will-change: transform;
@@ -2443,6 +2479,15 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 .setting-item.is-stacked { align-items: flex-start; gap: 0.75rem; }
 .setting-copy { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .setting-copy small { font-size: 0.66rem; line-height: 1.4; color: rgba(0, 0, 0, 0.45); }
+.setting-night-label { display: inline-flex; align-items: center; gap: 8px; }
+.setting-night-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16), 0 1px 4px rgba(0, 0, 0, 0.18);
+  transition: background 0.2s ease;
+}
 
 /* ---------- Delegate filters ---------- */
 .stats-panel-count {
@@ -2858,6 +2903,39 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   color: rgba(255, 255, 255, 0.45);
 }
 .stats-gate-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+
+/* The code on a failed request. It is the one part of the card worth copying
+   out, so it sits on its own line in a monospaced face and can be selected. */
+.stats-error-code {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+}
+.stats-error-code span {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.45);
+}
+.stats-error-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #ffe0b8;
+  user-select: all;
+}
+.stats-error-hint {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.45);
+}
 
 /* ---------- Retention, habits, churn ----------
    These panels read as a grid of small figures rather than one big number per

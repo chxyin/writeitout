@@ -100,6 +100,10 @@ alter table reps add column if not exists constructive_feedback text;
 alter table reps add column if not exists rewritten_poi text;
 alter table reps add column if not exists rewrite_explanation text;
 alter table reps add column if not exists write_ms integer;
+-- The developer view can take one run out of every aggregate without deleting it
+-- (a test run, a joke answer, a duplicate). Excluded rows stay readable in God
+-- Mode so they can be put back; `store.py` filters every aggregate with it.
+alter table reps add column if not exists excluded boolean not null default false;
 
 -- Product analytics. Written by the batched ingest endpoint; rolled up nightly.
 create table if not exists events (

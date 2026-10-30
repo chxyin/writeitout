@@ -19,7 +19,12 @@ import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import UserDrawer from './UserDrawer.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
-import { fetchAdminStats, downloadSummaryCsv, STATS_RANGES } from '../lib/stats.js';
+import {
+  fetchAdminStats,
+  downloadSummaryCsv,
+  formatErrorCode,
+  STATS_RANGES
+} from '../lib/stats.js';
 import { saveStorageMode, saveTrialMode } from '../lib/practice.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 import { goHome } from '../lib/route.js';
@@ -181,8 +186,16 @@ export default function AdminStats({
   const [reload, setReload] = useState(0);
   // One object for the fetch, keyed by the request it belongs to. Nothing has to
   // be reset synchronously when the window or the account changes: a request
-  // whose key no longer matches simply reads as "loading".
-  const [loaded, setLoaded] = useState({ key: '', status: 'idle', data: null, message: '' });
+  // whose key no longer matches simply reads as "loading". A failure keeps its
+  // HTTP status and the server's code, which the error card shows.
+  const [loaded, setLoaded] = useState({
+    key: '',
+    status: 'idle',
+    data: null,
+    message: '',
+    statusCode: 0,
+    code: null
+  });
   const [authError, setAuthError] = useState('');
   // The deployment-wide answer-storage policy. null means "whatever the server
   // last reported"; once the admin flips it the local value leads, so the switch
@@ -212,14 +225,16 @@ export default function AdminStats({
     fetchAdminStats({ rangeId, from, to }).then((result) => {
       if (cancelled) return;
       if (result.data) {
-        setLoaded({ key, status: 'ready', data: result.data, message: '' });
+        setLoaded({ key, status: 'ready', data: result.data, message: '', statusCode: 200, code: null });
         return;
       }
       setLoaded({
         key,
         status: result.status === 403 ? 'forbidden' : 'error',
         data: null,
-        message: result.message
+        message: result.message,
+        statusCode: result.status || 0,
+        code: result.code || null
       });
     });
 
@@ -412,6 +427,14 @@ export default function AdminStats({
             <h2 className="card-title">The statistics could not be read</h2>
             <p className="session-gate-copy">
               {loaded.message || 'The chair’s records are not reachable right now.'}
+            </p>
+            <p className="stats-error-code">
+              <span>Error code</span>
+              <code>{formatErrorCode(loaded.statusCode, loaded.code)}</code>
+            </p>
+            <p className="stats-error-hint">
+              Quote the code if this needs reporting — it names the step that failed, not your
+              account.
             </p>
             <div className="stats-gate-actions">
               <button type="button" className="play-btn" onClick={() => setReload((n) => n + 1)}>

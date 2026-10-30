@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
-from store import STORAGE_MODES, get_store, store_source
+from store import STORAGE_MODES, StatsError, get_store, store_source
 
 load_dotenv()
 
@@ -1138,11 +1138,27 @@ def admin_stats(
 
     try:
         stats = store.admin_stats(window_start, window_end)
+    except StatsError as error:
+        # A query failed, and the store knows which one. The section travels as a
+        # code the page can show ("stats.habits"), so a screenshot is enough to
+        # start looking — without the driver's message, which can carry the DSN.
+        logger.error("Admin statistics failed in section %s", error.section)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "The statistics could not be read.",
+                "code": f"stats.{error.section}",
+            },
+        ) from error
     except Exception as error:  # noqa: BLE001 - a broken read is a 503, not a 500
         # Only the error's type is logged: a driver error can carry the DSN.
         logger.error("Admin statistics failed: %s", type(error).__name__)
         raise HTTPException(
-            status_code=503, detail="The statistics could not be read."
+            status_code=503,
+            detail={
+                "message": "The statistics could not be read.",
+                "code": f"stats.{type(error).__name__}",
+            },
         ) from error
 
     # Spend is derived here rather than in the store: the price is a setting of

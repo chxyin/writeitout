@@ -1,5 +1,24 @@
 # Versions
 
+## Version 1.3 - Night Light and Self-Describing Failures
+
+Builds on v1.2. The page ships warm, the developer view explains its own
+failures, and one schema column that the live database never got is back.
+
+- **Night light, on by default.** Every screen carries a warm cast (a backdrop
+  filter, so fixed overlays such as the drawer and the trial gate keep pinning to
+  the screen). **Settings → General** has the switch and a **Warmth** slider from
+  orange to lemon; the choice is per browser.
+- **Error codes.** A dashboard that fails now shows the HTTP status and the
+  section that broke (`HTTP 503 · stats.habits`) instead of one grey sentence, so
+  a screenshot is a diagnosis. The same code appears on the delegate drawer and
+  after a refused edit.
+- **Fixed: the dashboard could not be read at all.** `reps.excluded` was added to
+  the queries but never to `schema.sql`, so every aggregate asked Postgres for a
+  column that did not exist and the whole page answered 503. The column is now
+  part of the schema's idempotent migrations, which is how the live database
+  picks it up on the next cold start.
+
 ## Version 1.2 - Practice Statistics and Answer Storage
 
 Builds on v1.1. The developer view grows from "how much was graded" to "is this

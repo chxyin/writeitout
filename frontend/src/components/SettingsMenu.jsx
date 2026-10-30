@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ZOOM_RANGE } from '../lib/zoom.js';
-import { COLOR_THEMES, BACKGROUNDS } from '../lib/appearance.js';
+import { COLOR_THEMES, BACKGROUNDS, NIGHT_HUE_RANGE, nightTint } from '../lib/appearance.js';
 import {
   TOP_OFFSET_RANGE,
   BOTTOM_OFFSET_RANGE,
@@ -24,6 +24,9 @@ const asPercent = (value) => `${Math.round(value * 100)}%`;
 const asVh = (value) => `${value}vh`;
 const asRem = (value) => `${value}rem`;
 const asPx = (value) => `${value}px`;
+// A hue angle, not a percentage: "45°" is what the slider in a colour picker
+// would say, and it is the unit the CSS custom property takes.
+const asHue = (value) => `${value}°`;
 
 /**
  * One preference row: a minus / range / plus control with the readout doubling
@@ -93,6 +96,10 @@ export default function SettingsMenu({
   onShowCommToggle,
   lowIntensity,
   onLowIntensityToggle,
+  nightLight,
+  onNightLightToggle,
+  nightHue,
+  onNightHueChange,
   theme,
   onThemeChange,
   background,
@@ -227,6 +234,47 @@ export default function SettingsMenu({
                   <span className="toggle-knob-sm" />
                 </button>
               </div>
+
+              {/* Night light. On by default, so the row carries both the switch
+                  and — when it is on — the one dial it has: the colour of the
+                  warmth. The swatch is the hue itself, which is easier to judge
+                  than a number on a screen that is already amber. */}
+              <div className="setting-item is-stacked">
+                <div className="setting-copy">
+                  <span className="setting-night-label">
+                    Night light
+                    <span
+                      className="setting-night-swatch"
+                      style={{ background: nightTint(nightHue) }}
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <small>
+                    {nightLight
+                      ? 'Every colour on the page is warmed a little, for practising after dark.'
+                      : 'Colours are as the app was designed — no warm cast.'}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={nightLight}
+                  aria-label="Night light"
+                  className={`toggle-switch-sm ${nightLight ? 'active' : ''}`}
+                  onClick={onNightLightToggle}
+                >
+                  <span className="toggle-knob-sm" />
+                </button>
+              </div>
+              {nightLight && (
+                <SliderRow
+                  label="Warmth"
+                  value={nightHue}
+                  range={NIGHT_HUE_RANGE}
+                  formatValue={asHue}
+                  onChange={onNightHueChange}
+                />
+              )}
 
               {/* The one setting that is about the account rather than the screen:
                   it lives here because this is where a delegate looks for "what

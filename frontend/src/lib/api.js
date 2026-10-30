@@ -1,9 +1,9 @@
-/**
+﻿/**
  * One place for the chair API: base URL, the signed-in credential, a timeout and
  * a readable error.
  *
  * Every call is bounded in time. A Vercel function that hangs must surface as a
- * failed save, not as a screen stuck on "saving…".
+ * failed save, not as a screen stuck on "savingâ€¦".
  */
 
 import { authorizationHeaders } from './auth.js';
@@ -16,11 +16,29 @@ export const API_BASE_URL =
 const DEFAULT_TIMEOUT_MS = 8_000;
 
 class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, code = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    // A short machine label the server attached ("stats.habits"). It is what
+    // turns "it broke" into a diagnosis, so the page shows it to the reader.
+    this.code = code;
   }
+}
+
+/**
+ * The error body, as a message and a code. FastAPI's `detail` is a string for
+ * most failures and an object `{ message, code }` for the ones that carry a
+ * code â€” both shapes arrive here and leave as two strings.
+ */
+function readError(data) {
+  const detail = data && data.detail;
+  if (typeof detail === 'string') return { message: detail, code: null };
+  const object = detail && typeof detail === 'object' ? detail : null;
+  return {
+    message: (object && object.message) || null,
+    code: (object && object.code) || (data && data.code) || null
+  };
 }
 
 async function request(
@@ -47,8 +65,8 @@ async function request(
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const detail = data && typeof data.detail === 'string' ? data.detail : null;
-      throw new ApiError(detail || `Request failed (${response.status})`, response.status);
+      const { message, code } = readError(data);
+      throw new ApiError(message || `Request failed (${response.status})`, response.status, code);
     }
     return data;
   } finally {

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAdminUser, downloadRepsCsv, patchRep, deleteRep } from '../lib/stats.js';
+import { fetchAdminUser, downloadRepsCsv, formatErrorCode, patchRep, deleteRep } from '../lib/stats.js';
 
 /** 1,234 → "1,234"; missing → "—". */
 function count(value) {
@@ -185,7 +185,14 @@ function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
 }
 
 export default function UserDrawer({ sub, onClose, onChanged = null }) {
-  const [loaded, setLoaded] = useState({ sub: '', data: null, status: 'loading', message: '' });
+  const [loaded, setLoaded] = useState({
+    sub: '',
+    data: null,
+    status: 'loading',
+    message: '',
+    statusCode: 0,
+    code: null
+  });
   const [filter, setFilter] = useState('');
   // Bumped after every write so the drawer re-reads itself; the dashboard behind
   // it is refreshed through `onChanged`.
@@ -199,8 +206,15 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
       if (cancelled) return;
       setLoaded(
         result.data
-          ? { sub, data: result.data, status: 'ready', message: '' }
-          : { sub, data: null, status: 'error', message: result.message }
+          ? { sub, data: result.data, status: 'ready', message: '', statusCode: 200, code: null }
+          : {
+              sub,
+              data: null,
+              status: 'error',
+              message: result.message,
+              statusCode: result.status || 0,
+              code: result.code || null
+            }
       );
     });
     return () => {
@@ -216,7 +230,7 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
     const result = await work();
     setBusyId('');
     if (!result.ok) {
-      setActionError(result.message);
+      setActionError(result.code ? `${result.message} (${result.code})` : result.message);
       return;
     }
     setToken((current) => current + 1);
@@ -285,7 +299,13 @@ export default function UserDrawer({ sub, onClose, onChanged = null }) {
         </div>
 
         {loaded.status === 'error' ? (
-          <p className="stats-empty">{loaded.message}</p>
+          <div className="stats-empty">
+            <p>{loaded.message}</p>
+            <p className="stats-error-code">
+              <span>Error code</span>
+              <code>{formatErrorCode(loaded.statusCode, loaded.code)}</code>
+            </p>
+          </div>
         ) : !ready ? (
           <div className="loading-message">Reading the delegate...</div>
         ) : (

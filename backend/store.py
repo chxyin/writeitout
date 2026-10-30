@@ -38,6 +38,21 @@ if DEFAULT_STORAGE_MODE not in STORAGE_MODES:
     DEFAULT_STORAGE_MODE = "full"
 
 
+class StatsError(RuntimeError):
+    """A dashboard query failed, tagged with the section that failed.
+
+    The dashboard is one request built from about eighteen queries, so "the
+    statistics could not be read" on its own is useless to whoever has to fix
+    it. The section name travels to the browser as an error code
+    (`stats.habits`), which turns a screenshot into a diagnosis without the
+    driver's message — which can carry the DSN — ever leaving the server.
+    """
+
+    def __init__(self, section: str):
+        super().__init__(section)
+        self.section = section
+
+
 def today_hk() -> date:
     """The practice day in the app's own timezone, not the server's."""
     return datetime.now(HK).date()
@@ -1535,7 +1550,14 @@ class PostgresStore(Store):
             return int(value or 0)
 
         with self._conn() as conn:
-            totals = conn.execute(
+            def run(section: str, sql: str, params: Any = None) -> Any:
+                """One query, tagged so a failure names the section that broke."""
+                try:
+                    return conn.execute(sql) if params is None else conn.execute(sql, params)
+                except Exception as error:  # noqa: BLE001 - re-raised with a section
+                    raise StatsError(section) from error
+
+            totals = run("totals",
                 f"""
                 select
                     (select count(*) from delegates) as delegates,
@@ -1547,7 +1569,7 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchone()
 
-            activity = conn.execute(
+            activity = run("activity",
                 """
                 select
                     count(distinct user_sub) filter (
@@ -1563,7 +1585,7 @@ class PostgresStore(Store):
                 """
             ).fetchone()
 
-            reps = conn.execute(
+            reps = run("reps",
                 f"""
                 select
                     count(*) as reps,
@@ -1581,7 +1603,7 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchone()
 
-            sessions = conn.execute(
+            sessions = run("sessions",
                 f"""
                 select
                     count(*) as sessions,
@@ -1593,14 +1615,14 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchone()
 
-            ticks = conn.execute(
+            ticks = run("ticks",
                 f"select count(*) as ticks from activity_ticks where created_at >= %s and created_at < %s",
                 (start, end),
             ).fetchone()
 
             # The daily series: three grouped queries, merged below, rather than
             # one query with three left joins that would fan out the counts.
-            daily_reps = conn.execute(
+            daily_reps = run("daily_reps",
                 f"""
                 select {hk_day} as day,
                        count(*) as reps,
@@ -1614,7 +1636,7 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchall()
 
-            daily_sessions = conn.execute(
+            daily_sessions = run("daily_sessions",
                 f"""
                 select {started_day} as day, count(*) as sessions
                 from practice_sessions
@@ -1624,7 +1646,7 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchall()
 
-            daily_ticks = conn.execute(
+            daily_ticks = run("daily_ticks",
                 f"""
                 select {hk_day} as day,
                        count(distinct user_sub) as active_users,
@@ -1638,7 +1660,7 @@ class PostgresStore(Store):
 
             histogram = {
                 int(row["score"]): whole(row["reps"])
-                for row in conn.execute(
+                for row in run("histogram",
                     f"""
                     select greatest(1, least(10, round(score)::int)) as score,
                            count(*) as reps
@@ -1650,7 +1672,7 @@ class PostgresStore(Store):
                 ).fetchall()
             }
 
-            topics = conn.execute(
+            topics = run("topics",
                 f"""
                 select topic, count(*) as reps, avg(score) as avg_score
                 from reps
@@ -1662,7 +1684,7 @@ class PostgresStore(Store):
                 (start, end),
             ).fetchall()
 
-            busiest = conn.execute(
+            busiest = run("delegates",
                 """
                 select user_sub, email, display_name, total_reps, score_sum, best_score,
                        longest_streak, last_seen_at, last_practice_on, created_at,
@@ -1677,7 +1699,7 @@ class PostgresStore(Store):
             # exactly N Hong Kong days after the day they first signed in — the
             # usual D1/D7/D30 read. A signup that has not yet had those days is
             # left out of the denominator instead of being counted as lost.
-            retention = conn.execute(
+            retention = run("retention",
                 """
                 with joined as (
                     select user_sub, (created_at at time zone 'Asia/Hong_Kong')::date as day
@@ -1708,7 +1730,7 @@ class PostgresStore(Store):
             # Cohorts: everyone who joined in the same week, and how many of them
             # were back in each of the following four weeks. This is the habit
             # question the totals cannot answer — "do new delegates come back".
-            cohorts = conn.execute(
+            cohorts = run("cohorts",
                 """
                 with joined as (
                     select user_sub,
@@ -1744,7 +1766,7 @@ class PostgresStore(Store):
 
             # Who has gone quiet. `never` is a signed-in account with no graded
             # run at all — a different problem from a delegate who stopped.
-            lapsed_counts = conn.execute(
+            lapsed_counts = run("lapsed_counts",
                 """
                 select
                     count(*) filter (where last_practice_on >= current_date - 7)
@@ -1762,7 +1784,7 @@ class PostgresStore(Store):
                 """
             ).fetchone()
 
-            lapsed = conn.execute(
+            lapsed = run("lapsed",
                 """
                 select email, display_name, total_reps, last_practice_on,
                        (current_date - last_practice_on) as days_ago
@@ -1778,7 +1800,7 @@ class PostgresStore(Store):
             # was never closed is left out of the length averages — its end time is
             # the moment the tab was next opened, not a practice duration — and one
             # left open overnight is capped at four hours for the same reason.
-            habits = conn.execute(
+            habits = run("habits",
                 f"""
                 select
                     count(*) as sessions,
@@ -1803,7 +1825,7 @@ class PostgresStore(Store):
             ).fetchone()
 
             # Where the run count lands, bucketed at 8+: the drop-off shape.
-            dropoff = conn.execute(
+            dropoff = run("dropoff",
                 f"""
                 select least(reps_done, 8) as runs, count(*) as sessions
                 from practice_sessions
@@ -1816,7 +1838,7 @@ class PostgresStore(Store):
             # How much of the clock the delegate used, for runs that had a clock
             # and a recorded writing time. The median is the honest number: one
             # run submitted after a coffee break would drag an average.
-            clock = conn.execute(
+            clock = run("clock",
                 f"""
                 select
                     count(*) as measured,

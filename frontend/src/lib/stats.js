@@ -10,6 +10,16 @@
 import { api } from './api.js';
 
 /**
+ * The one line that makes a failure diagnosable: "HTTP 503 · stats.habits".
+ * A request that never reached the API has no status at all, so it says that
+ * rather than printing a 0 nobody would trust.
+ */
+export function formatErrorCode(statusCode, code) {
+  const http = statusCode ? `HTTP ${statusCode}` : 'No response';
+  return code ? `${http} · ${code}` : http;
+}
+
+/**
  * The windows the picker offers. `days` counts back from today in Hong Kong
  * time; `custom` hands two calendar dates to the same endpoint.
  */
@@ -42,6 +52,7 @@ export async function fetchAdminStats({ rangeId = '30', from = '', to = '' } = {
     return {
       data: null,
       status: error && error.status ? error.status : 0,
+      code: (error && error.code) || null,
       message: error && error.message ? error.message : 'The statistics could not be loaded.'
     };
   }
@@ -55,6 +66,7 @@ export async function fetchAdminUser(sub) {
     return {
       data: null,
       status: error && error.status ? error.status : 0,
+      code: (error && error.code) || null,
       message: error && error.message ? error.message : 'That delegate could not be read.'
     };
   }
@@ -69,7 +81,11 @@ export async function patchRep(id, body) {
   try {
     return { ok: true, data: await api.patch(`/api/admin/reps/${encodeURIComponent(id)}`, body) };
   } catch (error) {
-    return { ok: false, message: (error && error.message) || 'That change was refused.' };
+    return {
+      ok: false,
+      code: (error && error.code) || null,
+      message: (error && error.message) || 'That change was refused.'
+    };
   }
 }
 
@@ -78,7 +94,11 @@ export async function deleteRep(id) {
   try {
     return { ok: true, data: await api.del(`/api/admin/reps/${encodeURIComponent(id)}`) };
   } catch (error) {
-    return { ok: false, message: (error && error.message) || 'That run could not be deleted.' };
+    return {
+      ok: false,
+      code: (error && error.code) || null,
+      message: (error && error.message) || 'That run could not be deleted.'
+    };
   }
 }
 

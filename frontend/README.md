@@ -67,6 +67,30 @@ be edited and no clock runs, because the session is over. Opening it signed out
 asks for the Google sign-in in place; a session belonging to another account is
 a 404.
 
+## Night light
+
+Every screen is filtered warm by default — a fixed pane (`body.night-light::after`)
+in `src/index.css` holding a `backdrop-filter: sepia(...) saturate(...)
+hue-rotate(...)`. It is a backdrop filter and not a `filter` on `<html>` on
+purpose: a filtered ancestor becomes the containing block for `position: fixed`
+descendants, which would make the settings scrim, the delegate drawer and the
+trial gate scroll with the page instead of pinning to the screen.
+
+**Settings → General → Night light** turns it off, and while it is on, a
+**Warmth** slider picks the hue — 25° is orange, 65° is lemon, 45° is the warm
+desk-lamp default. The preference is per browser, in the same localStorage entry
+as the other settings (`nightLight`, `nightHue`), and nothing about it reaches the
+server.
+
+Two details worth keeping:
+
+- The custom property `--night-hue` is written on `<html>` and read by the filter,
+  so dragging the slider repaints without re-running the body-class effect.
+- **Write only the unprefixed `backdrop-filter`.** Lightning CSS adds the
+  `-webkit-` alias for Safari by itself; when both are written by hand it keeps
+  the alias *only*, and Chrome ignores the prefixed name, so the whole feature
+  silently disappears.
+
 ## Developer statistics
 
 `#/admin` is the one screen written for the person running the deployment: how
@@ -80,6 +104,14 @@ The `ⓘ What these numbers mean` button opens the definitions: what counts as a
 run, as an active delegate, and as spend, and that every day is a Hong Kong day.
 `/api/auth/google` returns `is_admin` so the start screen can show the link; that
 flag is cosmetic, the endpoint checks the token for itself.
+
+A failed read shows an **error code** under the message — `HTTP 503 ·
+stats.habits`. The dashboard is one request built from about eighteen queries, so
+`store.py` tags each one with its section (`StatsError`), `main.py` returns
+`{ message, code }` in the 503's `detail`, and `src/lib/api.js` hands the code to
+the page. A screenshot then names the query that broke, without the driver's own
+message — which can carry the DSN — ever leaving the server. The delegate drawer
+shows the same code, and a failed write in God Mode appends it to the sentence.
 
 Below the headline numbers the page answers three questions the totals cannot:
 
