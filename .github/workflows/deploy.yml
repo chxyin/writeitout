@@ -2,7 +2,12 @@ name: Deploy frontend to GitHub Pages
 
 on:
   push:
+    # Both names on purpose: the repository's branch was renamed master → main,
+    # and while a stale `master` still exists in a fork or a local clone, a push
+    # from it must still publish the site. Harmless where only one exists —
+    # the concurrency group makes the second run cancel the first.
     branches:
+      - main
       - master
   workflow_dispatch:
 
