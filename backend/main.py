@@ -806,7 +806,12 @@ def auth_google(payload: GoogleCredentialRequest, request: Request) -> dict[str,
     # ever stores a salted hash of it.
     store = get_store()
     store.upsert_delegate(claims)
-    store.record_ip(claims["sub"], client_identifier(request))
+    try:
+        store.record_ip(claims["sub"], client_identifier(request))
+    except Exception as error:  # noqa: BLE001
+        # Address history is a convenience for the developer view. It must never
+        # be the reason a delegate cannot sign in.
+        logger.warning("Could not record the sign-in address: %s", type(error).__name__)
     # The client cannot work this out for itself: the list of admin addresses is
     # a server secret. It only decides whether the Statistics link is drawn — the
     # endpoint itself checks the token again.
@@ -838,7 +843,10 @@ def start_session(payload: SessionStartRequest, request: Request) -> dict[str, A
     session_id = store.create_session(user["sub"], payload.reps_target, payload.seconds_per_rep)
     # Play is a fresh "they are here now" signal, so the address list stays useful
     # even for a delegate who signed in days ago.
-    store.record_ip(user["sub"], client_identifier(request))
+    try:
+        store.record_ip(user["sub"], client_identifier(request))
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Could not record the practice address: %s", type(error).__name__)
     return {"session_id": session_id}
 
 
