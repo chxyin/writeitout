@@ -25,6 +25,18 @@ secret. The **ID token** it returns is the credential: the backend verifies it a
 `POST /api/auth/google` and reads the account from it. `GET /api/me` returns the
 same verified profile for a `Bearer` token.
 
+## Deploying
+
+`.github/workflows/deploy.yml` builds this folder and publishes `frontend/dist`
+to GitHub Pages. It fires on `main` and on `master`, because the repository's
+branch was renamed and a stale clone may still push the old name.
+
+The Pages site must be set to **Settings → Pages → Source: GitHub Actions**. With
+the older "Deploy from a branch" source, GitHub publishes the branch's own folder
+— which has no `index.html` at the root — and the whole site turns into a 404
+while the workflow's `deploy` job fails in about a second. That mismatch is worth
+checking first whenever the site is blank after a successful build.
+
 ## Routes
 
 The address bar is the router — `src/lib/route.js`, about thirty lines, no
