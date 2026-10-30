@@ -34,6 +34,7 @@ dependency:
 | --- | --- |
 | `/writeitout/` | the start screen (sign in, pick runs and timer, Play) |
 | `/writeitout/#/session/<id>` | one past session, replayed |
+| `/writeitout/#/admin` | the developer statistics (admin accounts only) |
 
 The session route is a hash because GitHub Pages serves files, not routes: a
 direct visit to `/writeitout/session/<id>` would 404. A hash link still
@@ -46,6 +47,20 @@ with Prev/Next through the runs and the completion card at the end. Nothing can
 be edited and no clock runs, because the session is over. Opening it signed out
 asks for the Google sign-in in place; a session belonging to another account is
 a 404.
+
+## Developer statistics
+
+`#/admin` is the one screen written for the person running the deployment: how
+many delegates signed in, how many runs the chair graded, the score spread, what
+the model costs, and who is practising most, over 7, 30 or 90 days. It is served
+by `GET /api/admin/stats`, which is admin-only — the address list is the backend's
+`ADMIN_EMAILS`, so the page cannot be unlocked from the browser. A signed-in
+non-admin gets a "not an admin" card instead of the numbers.
+
+The `ⓘ What these numbers mean` button opens the definitions: what counts as a
+run, as an active delegate, and as spend, and that every day is a Hong Kong day.
+`/api/auth/google` returns `is_admin` so the start screen can show the link; that
+flag is cosmetic, the endpoint checks the token for itself.
 
 ## Scripts
 

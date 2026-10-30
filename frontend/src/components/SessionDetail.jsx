@@ -12,8 +12,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GoogleLogin } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
+import GoogleSignInButton from './GoogleSignInButton.jsx';
 import DrillForm from './DrillForm.jsx';
 import FeedbackCard from './FeedbackCard.jsx';
 import SessionComplete from './SessionComplete.jsx';
@@ -269,17 +269,10 @@ export default function SessionDetail({
               know who is asking.
             </p>
             {GOOGLE_CLIENT_ID && onSignIn ? (
-              <div className="google-login-wrap">
-                <GoogleLogin
-                  onSuccess={handleSignIn}
-                  onError={() => setAuthError('Google sign-in did not finish. Please try again.')}
-                  theme="filled_black"
-                  shape="rectangular"
-                  size="large"
-                  text="continue_with"
-                  width="380"
-                />
-              </div>
+              <GoogleSignInButton
+                onSuccess={handleSignIn}
+                onError={() => setAuthError('Google sign-in did not finish. Please try again.')}
+              />
             ) : (
               <p className="auth-error" role="alert">Google sign-in is not configured for this build.</p>
             )}

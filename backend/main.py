@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,13 @@ ADMIN_EMAILS = {
 # Analytics never stores an IP, only a salted hash, so two requests from one
 # network can be correlated without keeping the address.
 ANALYTICS_SALT = os.getenv("ANALYTICS_SALT", "writeitout").strip()
+
+# DeepSeek's list price, in USD per million tokens, for the dashboard's spend
+# estimate. The app does not record cache hits separately, so every prompt token
+# is priced as a cache miss — the estimate errs high, never low. Overridable so a
+# price change (or a different model) is an env change, not a code change.
+COST_INPUT_PER_MTOK = float(os.getenv("COST_INPUT_PER_MTOK", "0.27"))
+COST_OUTPUT_PER_MTOK = float(os.getenv("COST_OUTPUT_PER_MTOK", "1.10"))
 
 DEFAULT_ALLOWED_ORIGINS = (
     "https://chxyin.github.io",
@@ -643,6 +651,17 @@ def _profile_json(delegate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _cost_usd(prompt_tokens: Any, completion_tokens: Any) -> float:
+    """What a pile of tokens cost at DeepSeek's list price, to a tenth of a cent."""
+    prompt = float(prompt_tokens or 0)
+    completion = float(completion_tokens or 0)
+    return round(
+        prompt / 1_000_000 * COST_INPUT_PER_MTOK
+        + completion / 1_000_000 * COST_OUTPUT_PER_MTOK,
+        4,
+    )
+
+
 SYSTEM_PROMPT = """
 You are an expert Model UN Chair. Review and rate the user's Point of Information (POI) on a scale of 1 to 10.
 Return ONLY a valid JSON object. Do NOT wrap it in markdown. Do NOT use any emojis.
@@ -772,7 +791,10 @@ def auth_google(payload: GoogleCredentialRequest, request: Request) -> dict[str,
         )
     claims = verify_google_credential(payload.credential)
     logger.info("Google sign-in verified for a delegate")
-    return claims
+    # The client cannot work this out for itself: the list of admin addresses is
+    # a server secret. It only decides whether the Statistics link is drawn — the
+    # endpoint itself checks the token again.
+    return {**claims, "is_admin": is_admin(claims)}
 
 
 @app.get("/api/me")
@@ -953,6 +975,44 @@ def write_settings(payload: StorageModeRequest, request: Request) -> dict[str, A
     get_store().set_storage_mode(payload.mode)
     logger.info("Answer storage mode set to %s", payload.mode)
     return {"ok": True, "poi_storage_mode": payload.mode}
+
+
+@app.get("/api/admin/stats")
+def admin_stats(request: Request, days: int = 30) -> dict[str, Any]:
+    """Admin only: how the deployment is being used.
+
+    Everything here is aggregate — counts, averages and spend — and never an
+    answer's text, so the dashboard can be read whatever the answer-storage mode
+    is. The window is in days; the store buckets by Hong Kong date, which is the
+    day a delegate experiences.
+    """
+    require_admin(request)
+    store = get_store()
+    window = max(1, min(365, days))
+
+    try:
+        stats = store.admin_stats(window)
+    except Exception as error:  # noqa: BLE001 - a broken read is a 503, not a 500
+        # Only the error's type is logged: a driver error can carry the DSN.
+        logger.error("Admin statistics failed: %s", type(error).__name__)
+        raise HTTPException(
+            status_code=503, detail="The statistics could not be read."
+        ) from error
+
+    # Spend is derived here rather than in the store: the price is a setting of
+    # this deployment, not a property of the data.
+    totals = stats["totals"]
+    totals["cost_usd"] = _cost_usd(totals["prompt_tokens"], totals["completion_tokens"])
+    totals["cost_per_rep_usd"] = (
+        round(totals["cost_usd"] / totals["reps"], 4) if totals["reps"] else None
+    )
+    for day in stats["daily"]:
+        day["cost_usd"] = _cost_usd(day["prompt_tokens"], day["completion_tokens"])
+
+    stats["storage_mode"] = store.storage_mode()
+    stats["model"] = DEEPSEEK_MODEL
+    stats["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return stats
 
 
 # --------------------------------------------------------------------------- #

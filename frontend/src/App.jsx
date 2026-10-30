@@ -34,6 +34,7 @@ import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
 import SessionDetail from './components/SessionDetail.jsx';
+import AdminStats from './components/AdminStats.jsx';
 import TimeUpOverlay from './components/TimeUpOverlay.jsx';
 import useBreakpoint from './hooks/useBreakpoint.js';
 import useViewportHeight from './hooks/useViewportHeight.js';
@@ -226,6 +227,11 @@ export default function App() {
           signOut();
           return false;
         }
+        // Only the server knows whether this address runs the deployment, so the
+        // session is upgraded once it has answered. It decides nothing but the
+        // Statistics link; the endpoint behind it checks the token again.
+        const data = await response.json().catch(() => null);
+        if (data && data.is_admin) signIn(credential, true);
       } catch {
         // Network failure: keep the session rather than punishing the delegate
         // for a flaky connection to the chair API.
@@ -894,6 +900,19 @@ export default function App() {
     return (
       <SessionDetail
         sessionId={route.id}
+        session={session}
+        onSignIn={handleSignIn}
+        animOn={animOn}
+        lowIntensity={lowIntensity}
+      />
+    );
+  }
+
+  // The developer's own screen. It is not part of the delegate's flow: the URL
+  // is the way in, and the API refuses any account that is not an admin.
+  if (route.name === 'admin') {
+    return (
+      <AdminStats
         session={session}
         onSignIn={handleSignIn}
         animOn={animOn}

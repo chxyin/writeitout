@@ -1390,12 +1390,17 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
    card and clips it to the same 10px corner the app's other buttons use; the
    button itself renders in `filled_black`, which is the theme closest to the
    glass card it sits on. */
+/* The iframe is deliberately NOT forced to 100%: Google lays its button out at
+   the pixel width it is handed, so squeezing the frame afterwards clipped the
+   label. GoogleSignInButton measures this wrapper and hands Google that width,
+   which makes the two agree. overflow:hidden stays as the last resort for a
+   screen narrower than Google's 200px minimum. */
 .splash-screen .google-login-wrap {
   width: 100%; display: flex; justify-content: center;
   overflow: hidden; border-radius: 10px;
 }
 .splash-screen .google-login-wrap > div { width: 100%; display: flex; justify-content: center; }
-.splash-screen .google-login-wrap iframe { width: 100% !important; max-width: 100%; border-radius: 10px; }
+.splash-screen .google-login-wrap iframe { max-width: 100%; border-radius: 10px; }
 
 /* Only rendered when Google refuses or drops the sign-in, so it takes no space
    otherwise and clears itself on the next attempt. */
@@ -1918,7 +1923,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   overflow: hidden;
   border-radius: 10px;
 }
-.session-gate .google-login-wrap iframe { width: 100% !important; max-width: 100%; border-radius: 10px; }
+.session-gate .google-login-wrap iframe { max-width: 100%; border-radius: 10px; }
 .session-gate .auth-error { margin: 0; font-size: 0.8rem; color: #FFD9D6; }
 .session-gate-copy {
   margin: 0;
@@ -1933,4 +1938,350 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .session-title { font-size: 0.95rem; white-space: normal; }
   .session-badges { order: 2; margin-left: auto; }
 }
+
+/* The narrowest phones still in use (320–380px): six rep segments no longer fit
+   on one line, and a wrapped bar with "Custom" stranded on a line of its own
+   reads as a broken control. Tightening the segments — not dropping any — keeps
+   the row whole down to 320px. */
+@media (max-width: 380px) {
+  .splash-screen .segmented-control { padding: 2px; gap: 2px; }
+  .splash-screen .seg-btn { padding: 0.32rem 0.4rem; font-size: 0.72rem; letter-spacing: -0.01em; }
+}
+
+/* ---------- Developer statistics (#/admin) ----------
+   The same shell as a replayed session, filled with numbers instead of a POI. It
+   is built from the app's own vocabulary — translucent slabs, pill chips, the
+   red accent — so the dashboard reads as part of the product rather than as a
+   bolt-on admin page. Every block is a grid that collapses to one column on a
+   phone. */
+.admin-link {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+  text-decoration: none;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+}
+.admin-link:hover { color: #fff; border-bottom-color: #fff; }
+.admin-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+.stats-shell { max-width: 1100px; }
+.stats-top { align-items: flex-start; }
+
+/* The drifting sheets stay, but well back: the panels here are translucent, and
+   a bright sheet sliding under a column of numbers costs more legibility than the
+   texture is worth. The splash screen dims them for the same reason. */
+.stats-page .paper-container { opacity: 0.3; }
+
+/* The drill pins the shell to one screen and scrolls inside its own panes; the
+   dashboard is a long page instead, so it opts out of that lock. Without this the
+   locked shell clipped everything below the fold and the page had no scrollbar to
+   reach it. Later than the tier blocks that set the height, and more specific
+   than the bare .app-container rule, so it wins at every size. */
+.app-container.stats-shell {
+  height: auto;
+  min-height: calc(100dvh / var(--ui-scale));
+  max-height: none;
+  margin-top: 0;
+  margin-bottom: 0;
+  overflow: visible;
+}
+
+/* The three windows the page can be read over. */
+.stats-range {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  flex: 0 0 auto;
+}
+.stats-range-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.36rem 0.7rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stats-range-btn:hover { color: #fff; }
+.stats-range-btn.is-active { background: #fff; color: #1B1B1F; }
+.stats-range-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+.stats-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.stats-info-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.75rem 0.38rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.stats-info-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.stats-info-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* A lower-case i in a ring: the one piece of iconography this page owns. */
+.stats-info-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1B1B1F;
+  font-size: 0.72rem;
+  font-weight: 900;
+  font-style: normal;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.stats-updated { font-size: 0.72rem; color: rgba(255, 255, 255, 0.55); }
+
+/* The explanation the info button opens. Short lines, no jargon: what is counted
+   and what is deliberately not. */
+.stats-info {
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.36);
+}
+.stats-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+.stats-info-grid > div { display: flex; flex-direction: column; gap: 0.15rem; }
+.stats-info-grid strong { font-size: 0.8rem; font-weight: 800; color: #fff; }
+.stats-info-grid span { font-size: 0.76rem; line-height: 1.45; color: rgba(255, 255, 255, 0.7); }
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.7rem;
+}
+.stats-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
+  min-width: 0;
+}
+.stats-card-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+.stats-card-value {
+  font-size: 1.6rem;
+  font-weight: 900;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.stats-card-detail {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.62);
+}
+.stats-card.is-high .stats-card-value { color: #6BE38C; }
+.stats-card.is-mid .stats-card-value { color: var(--accent-orange); }
+.stats-card.is-low .stats-card-value { color: #FF8A80; }
+
+.stats-panel {
+  padding: 0.9rem 1rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.28);
+  min-width: 0;
+}
+.stats-panel-title {
+  margin: 0 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* Runs per day. Each bar scales to the busiest day in the window, so a quiet
+   stretch keeps its shape instead of flattening to the floor. */
+.stats-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 130px;
+}
+.stats-bar-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.stats-bar {
+  width: 100%;
+  max-width: 28px;
+  min-height: 2px;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.45));
+}
+.stats-bar.is-empty { background: rgba(255, 255, 255, 0.14); }
+.stats-chart-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+.stats-chart-peak { color: rgba(255, 255, 255, 0.45); }
+
+/* Two lists side by side on a wide screen, stacked on a phone. */
+.stats-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.7rem;
+}
+
+.stats-rows { display: flex; flex-direction: column; gap: 0.35rem; }
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.stats-row-key {
+  flex: 0 0 1.4rem;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+}
+.stats-row-track {
+  flex: 1 1 auto;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.stats-row-fill { height: 100%; border-radius: 999px; background: rgba(255, 255, 255, 0.6); }
+.stats-row-fill.is-high { background: #34C759; }
+.stats-row-fill.is-mid { background: var(--accent-orange); }
+.stats-row-fill.is-low { background: #FF6B60; }
+.stats-row-value {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+/* A topic row is the name, the count, then its average — no track, because a
+   topic list is read by name, not by bar length. */
+.stats-row.is-topic { gap: 0.6rem; }
+.stats-row-topic {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.88);
+}
+.stats-row-score {
+  flex: 0 0 2.6rem;
+  text-align: right;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.stats-row-score.is-high { color: #6BE38C; }
+.stats-row-score.is-mid { color: var(--accent-orange); }
+.stats-row-score.is-low { color: #FF8A80; }
+
+.stats-table { display: flex; flex-direction: column; max-width: 760px; }
+.stats-table-head,
+.stats-table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 44px 44px;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.stats-table-head {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.stats-table-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+}
+.stats-table-row:last-child { border-bottom: none; }
+/* The three number columns, named rather than "anything but the first child":
+   the delegate cell holds a second span (the address) that must stay left. */
+.stats-num { text-align: right; }
+.stats-delegate { display: flex; flex-direction: column; min-width: 0; }
+.stats-delegate-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+}
+.stats-delegate-email {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-empty { margin: 0; font-size: 0.78rem; color: rgba(255, 255, 255, 0.55); }
+.stats-footnote {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.45);
+}
+.stats-gate-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+
+@media (max-width: 640px) {
+  .stats-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  .stats-card { padding: 0.65rem 0.7rem; }
+  .stats-card-value { font-size: 1.25rem; }
+  .stats-chart { height: 100px; gap: 2px; }
+  .stats-panel { padding: 0.75rem 0.8rem 0.85rem; }
+  .stats-table-head,
+  .stats-table-row { grid-template-columns: minmax(0, 1fr) 44px 38px 38px; font-size: 0.74rem; }
+  .stats-range-btn { padding: 0.34rem 0.55rem; font-size: 0.7rem; }
+  .stats-info-btn { font-size: 0.74rem; }
+}
+
 

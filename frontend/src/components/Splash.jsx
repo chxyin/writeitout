@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { GoogleLogin, googleLogout } from '@react-oauth/google';
+import { googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
+import GoogleSignInButton from './GoogleSignInButton.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
 import { fetchHistory } from '../lib/practice.js';
-import { sessionHash } from '../lib/route.js';
+import { sessionHash, ADMIN_HASH } from '../lib/route.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
 // loaded through <img> is an isolated document, so the Google Fonts @import
@@ -291,6 +292,14 @@ export default function Splash({
                   Sign Out
                 </button>
               </div>
+              {/* Only the deployment's admin sees this. The flag comes back from
+                  the sign-in check, and the page behind the link checks the token
+                  again — hiding the link is a courtesy, not the lock. */}
+              {user?.is_admin && (
+                <a className="admin-link" href={ADMIN_HASH}>
+                  Developer statistics →
+                </a>
+              )}
             </div>
           ) : (
             <div className="glass-card auth-card">
@@ -301,17 +310,12 @@ export default function Splash({
                   is only mounted when a client ID exists, because Google's script
                   throws on an empty one rather than failing quietly. */}
               {GOOGLE_CLIENT_ID ? (
-                <div className="google-login-wrap">
-                  <GoogleLogin
-                    onSuccess={handleLoginSuccess}
-                    onError={handleLoginError}
-                    theme="filled_black"
-                    shape="rectangular"
-                    size="large"
-                    text="continue_with"
-                    width="380"
-                  />
-                </div>
+                // Sized to the card rather than to a fixed 380: on a phone the
+                // fixed width ran past the card's edge and clipped the label.
+                <GoogleSignInButton
+                  onSuccess={handleLoginSuccess}
+                  onError={handleLoginError}
+                />
               ) : (
                 <p className="auth-error" role="alert">
                   Google sign-in is not configured for this build.

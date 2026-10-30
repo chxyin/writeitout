@@ -28,10 +28,31 @@ function isLive(session) {
  * — but it carries no expiry, so it is never persisted and cannot outlive the
  * page.
  */
-export function createSession(credential) {
+/**
+ * Builds a session from the credential Google returned. A token that cannot be
+ * decoded still signs the delegate in — the card falls back to a lettered avatar
+ * — but it carries no expiry, so it is never persisted and cannot outlive the
+ * page.
+ *
+ * `isAdmin` is not in the token: the app cannot know which addresses run the
+ * deployment. It comes back from the one request that verifies the credential,
+ * and is only ever used to decide whether to draw the Statistics link — the
+ * statistics endpoint checks the same token again for itself.
+ */
+export function createSession(credential, isAdmin = false) {
   const claims = decodeGoogleCredential(credential);
-  if (!claims) return { credential, sub: '', name: '', email: '', picture: '', exp: 0 };
-  return { credential, ...claims };
+  if (!claims) {
+    return {
+      credential,
+      sub: '',
+      name: '',
+      email: '',
+      picture: '',
+      exp: 0,
+      is_admin: Boolean(isAdmin)
+    };
+  }
+  return { credential, ...claims, is_admin: Boolean(isAdmin) };
 }
 
 /** The stored session, or null when there is none or it has expired. */
@@ -50,7 +71,8 @@ export function loadSession() {
     name: typeof parsed.name === 'string' ? parsed.name : '',
     email: typeof parsed.email === 'string' ? parsed.email : '',
     picture: typeof parsed.picture === 'string' ? parsed.picture : '',
-    exp: Number.isFinite(parsed.exp) ? parsed.exp : 0
+    exp: Number.isFinite(parsed.exp) ? parsed.exp : 0,
+    is_admin: parsed.is_admin === true
   };
   if (!isLive(session)) return null;
   return session;
@@ -95,8 +117,8 @@ export function authorizationHeaders() {
 export default function useAuthSession() {
   const [session, setSession] = useState(loadSession);
 
-  const signIn = useCallback((credential) => {
-    const next = createSession(credential);
+  const signIn = useCallback((credential, isAdmin = false) => {
+    const next = createSession(credential, isAdmin);
     saveSession(next);
     setSession(next);
     return next;
