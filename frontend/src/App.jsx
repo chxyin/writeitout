@@ -18,6 +18,7 @@ import appIcon from './assets/writeitout_icon.svg';
 import { HISTORY_STORAGE_KEY, loadSessionHistory, saveSessionResult } from './lib/sessionHistory.js';
 import useAuthSession, { authorizationHeaders } from './lib/auth.js';
 import { API_BASE_URL } from './lib/api.js';
+import { visitorId } from './lib/trial.js';
 import {
   beginPracticeSession,
   closeOrphanedSession,
@@ -25,6 +26,7 @@ import {
   endPracticeSession,
   flushSessionOnHide,
   importLocalHistory,
+  fetchTrialState,
   rateSession,
   recordRep,
   repId,
@@ -37,6 +39,7 @@ import Splash from './components/Splash.jsx';
 import DrillForm from './components/DrillForm.jsx';
 import FeedbackCard from './components/FeedbackCard.jsx';
 import SessionComplete from './components/SessionComplete.jsx';
+import TrialGate from './components/TrialGate.jsx';
 import SessionDetail from './components/SessionDetail.jsx';
 import AdminStats from './components/AdminStats.jsx';
 import TimeUpOverlay from './components/TimeUpOverlay.jsx';
@@ -236,6 +239,24 @@ export default function App() {
   }, [session]);
 
   const answersLocked = deploymentMode !== null && deploymentMode !== 'full';
+
+  // Trial mode: while it is on, a visitor without an account gets one practice.
+  // Read on load and re-read when the account changes, because signing in has to
+  // lift the gate immediately.
+  const [trial, setTrial] = useState(null);
+  const [trialBlocked, setTrialBlocked] = useState(false);
+  const [trialNotice, setTrialNotice] = useState('');
+  const [trialAuthError, setTrialAuthError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTrialState().then((state) => {
+      if (!cancelled && state) setTrial(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   const handleToggleAnswers = async () => {
     if (answersLocked || answersSaving) return;
@@ -631,7 +652,9 @@ export default function App() {
         headers: {
           'Content-Type': 'application/json',
           // Sent when signed in so the API can meter a delegate rather than an IP.
-          ...authorizationHeaders()
+          ...authorizationHeaders(),
+          // The trial's counter key. Harmless when trial mode is off.
+          'X-Visitor': visitorId()
         },
         body: JSON.stringify({
           speech: currentDrill.full_speech,
@@ -650,6 +673,13 @@ export default function App() {
         signOut();
         throw new Error('Your session expired. Please sign in again.');
       }
+      if (response.status === 403 && data && typeof data.detail === 'string' && data.detail.includes('enforcing sign-ins')) {
+        // The trial's second practice. The server refuses it; the page explains
+        // why and offers the sign-in in place of the answer box.
+        setTrialNotice(data.detail);
+        setTrialBlocked(true);
+        throw new Error('Sign in to keep practising.');
+      }
       if (!response.ok) {
         throw new Error(describeApiError(data, response.status));
       }
@@ -667,6 +697,14 @@ export default function App() {
             ? { drill: currentDrill, poi, feedback: data, timedOut: clockExpired }
             : entry
         )
+      );
+
+      // A trial visitor has just spent their free practice. The server is the one
+      // counting; this only keeps the start screen's note honest without a reload.
+      setTrial((current) =>
+        current && current.trial_mode && !session
+          ? { ...current, used: current.used + 1, allowed: false }
+          : current
       );
 
       // Persist the rep while the cost trail is still in hand. The recorder queues
@@ -864,6 +902,13 @@ export default function App() {
   // reps will hang from. Reps graded before that row exists are queued by the
   // recorder rather than dropped.
   const handleStart = (next) => {
+    // Trial mode: the free practice is spent, so Play asks for the sign-in
+    // instead of opening a drill the chair would then refuse to grade.
+    if (trial && trial.trial_mode && !session && !trial.allowed) {
+      setTrialNotice(trial.notice || '');
+      setTrialBlocked(true);
+      return;
+    }
     setGameSettings(next);
     persistLastSession(next);
     setCurrentView('game');
@@ -1033,6 +1078,30 @@ export default function App() {
     />
   );
 
+  // The sign-in gate trial mode raises. It is the same card from either view, so
+  // it sits beside the settings menu rather than inside the drill. Signing in
+  // drops it: the gate belongs to "not signed in", so it needs no state reset.
+  const trialGate = trialBlocked && !session ? (
+    <TrialGate
+      notice={trialNotice || (trial && trial.notice) || ''}
+      onSignIn={async (credential) => {
+        const accepted = await handleSignIn(credential);
+        if (accepted !== false) {
+          setTrialBlocked(false);
+          setTrialAuthError('');
+        }
+        return accepted;
+      }}
+      onDismiss={() => setTrialBlocked(false)}
+      onExit={() => {
+        setTrialBlocked(false);
+        setShowMenu(false);
+      }}
+      authError={trialAuthError}
+      onAuthError={setTrialAuthError}
+    />
+  ) : null;
+
   if (currentView === 'splash') {
     return (
       <>
@@ -1045,8 +1114,16 @@ export default function App() {
           initialSettings={gameSettings}
           historyVersion={historyVersion}
           onStart={handleStart}
+          trialNote={
+            trial && trial.trial_mode && !session
+              ? trial.allowed
+                ? 'Trial mode: one free practice, then sign in.'
+                : 'Your free practice is used — sign in to keep going.'
+              : ''
+          }
         />
         {settingsMenu}
+        {trialGate}
       </>
     );
   }
@@ -1054,6 +1131,7 @@ export default function App() {
   return (
     <>
       {settingsMenu}
+      {trialGate}
 
       <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />
 

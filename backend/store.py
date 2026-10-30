@@ -212,6 +212,24 @@ class Store:
     def set_storage_mode(self, mode: str) -> None:
         raise NotImplementedError
 
+    def trial_mode(self) -> bool:
+        """Whether anonymous visitors are limited to a single practice."""
+        return False
+
+    def set_trial_mode(self, enabled: bool) -> None:
+        raise NotImplementedError
+
+    def claim_trial(self, visitor: str, ip: str | None) -> int:
+        """Count one practice for this visitor and return how many they have had.
+
+        1 means this was their free practice; 2 and above means the gate is shut.
+        """
+        raise NotImplementedError
+
+    def trial_practices(self, visitor: str) -> int:
+        """How many practices this visitor has already had (0 when unknown)."""
+        return 0
+
     # -- health ------------------------------------------------------------- #
     def ping(self) -> bool:
         """True when the backing store actually answers."""
@@ -244,7 +262,9 @@ class MemoryStore(Store):
         self._ticks: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._ips: dict[str, dict[str, dict[str, Any]]] = {}
+        self._trials: dict[str, dict[str, Any]] = {}
         self._mode = DEFAULT_STORAGE_MODE
+        self._trial = False
 
     def upsert_delegate(self, claims: dict[str, Any]) -> dict[str, Any]:
         sub = claims["sub"]
@@ -962,6 +982,28 @@ class MemoryStore(Store):
                         "created_at": datetime.now(HK),
                     }
                 )
+
+    def trial_mode(self) -> bool:
+        return self._trial
+
+    def set_trial_mode(self, enabled: bool) -> None:
+        with self._lock:
+            self._trial = bool(enabled)
+
+    def claim_trial(self, visitor: str, ip: str | None) -> int:
+        with self._lock:
+            row = self._trials.get(visitor)
+            if row is None:
+                row = {"visitor": visitor, "ip": ip, "practices": 0}
+                self._trials[visitor] = row
+            row["practices"] += 1
+            row["ip"] = ip or row.get("ip")
+            return int(row["practices"])
+
+    def trial_practices(self, visitor: str) -> int:
+        with self._lock:
+            row = self._trials.get(visitor)
+            return int(row["practices"]) if row else 0
 
     def storage_mode(self) -> str:
         return self._mode
@@ -1976,6 +2018,53 @@ class PostgresStore(Store):
                     "insert into events (user_sub, name, props, ip_hash) values (%s, %s, %s, %s)",
                     (sub, event["name"], json.dumps(event.get("props") or {}), ip_hash),
                 )
+
+    def trial_mode(self) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select value from app_settings where key = 'poi_trial_mode'"
+            ).fetchone()
+        if row is None:
+            return False
+        value = row["value"]
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "on", "yes")
+        return bool(value.get("enabled")) if isinstance(value, dict) else False
+
+    def set_trial_mode(self, enabled: bool) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                insert into app_settings (key, value) values ('poi_trial_mode', %s::jsonb)
+                on conflict (key) do update
+                    set value = excluded.value, updated_at = now()
+                """,
+                (json.dumps(bool(enabled)),),
+            )
+
+    def claim_trial(self, visitor: str, ip: str | None) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                insert into trial_visits (visitor, ip, practices) values (%s, %s, 1)
+                on conflict (visitor) do update
+                    set practices = trial_visits.practices + 1,
+                        ip = coalesce(excluded.ip, trial_visits.ip),
+                        last_seen = now()
+                returning practices
+                """,
+                (visitor, ip),
+            ).fetchone()
+        return int(row["practices"]) if row else 0
+
+    def trial_practices(self, visitor: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select practices from trial_visits where visitor = %s", (visitor,)
+            ).fetchone()
+        return int(row["practices"]) if row else 0
 
     def storage_mode(self) -> str:
         with self._conn() as conn:

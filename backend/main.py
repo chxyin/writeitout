@@ -189,6 +189,27 @@ def client_identifier(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+# Trial mode: one anonymous practice, then a sign-in. The id lives in a cookie the
+# page sets for itself, so it is first-party and survives the third-party cookie
+# rules; the address rides along as the second signal.
+TRIAL_SIGNIN_COPY = (
+    "The goal of enforcing sign-ins is purely to track how many users we've got for a "
+    "compsci project. No data is tracked or sold for commercial purposes. This project "
+    "wasn't created with money as a priority; it's more so for CV larp."
+)
+
+
+def visitor_id(request: Request) -> str:
+    """The browser's own trial id, or an address-derived stand-in."""
+    raw = (request.headers.get("x-visitor") or "").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "", raw)[:64]
+    if len(cleaned) >= 8:
+        return cleaned
+    # No header (an old client, or cookies blocked): count the address instead, so
+    # the gate still exists rather than silently letting everything through.
+    return f"ip-{hashlib.sha256(client_identifier(request).encode()).hexdigest()[:32]}"
+
+
 # --------------------------------------------------------------------------- #
 # Google Sign-In verification
 #
@@ -487,6 +508,13 @@ class RepAdminPatch(BaseModel):
 
     excluded: bool | None = None
     score: float | None = Field(default=None, ge=0, le=10)
+
+
+class AdminSettingsRequest(BaseModel):
+    """The deployment switches. Either field may be sent on its own."""
+
+    mode: str | None = Field(default=None, pattern="^(off|redacted|full)$")
+    trial_mode: bool | None = None
 
 
 class EventItem(BaseModel):
@@ -1010,18 +1038,50 @@ def ingest_events(payload: EventBatch, request: Request) -> dict[str, Any]:
 @app.get("/api/settings")
 def read_settings() -> dict[str, Any]:
     """The switches the UI needs to know about (no secrets in here)."""
-    return {"poi_storage_mode": get_store().storage_mode()}
+    store = get_store()
+    return {"poi_storage_mode": store.storage_mode(), "trial_mode": store.trial_mode()}
 
 
 @app.patch("/api/admin/settings")
-def write_settings(payload: StorageModeRequest, request: Request) -> dict[str, Any]:
-    """Admin only: change the deployment-wide answer-storage policy."""
+def write_settings(payload: AdminSettingsRequest, request: Request) -> dict[str, Any]:
+    """Admin only: change the deployment-wide switches."""
     require_admin(request)
-    if payload.mode not in STORAGE_MODES:
-        raise HTTPException(status_code=422, detail="Unknown storage mode.")
-    get_store().set_storage_mode(payload.mode)
-    logger.info("Answer storage mode set to %s", payload.mode)
-    return {"ok": True, "poi_storage_mode": payload.mode}
+    if payload.mode is None and payload.trial_mode is None:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    store = get_store()
+    if payload.mode is not None:
+        if payload.mode not in STORAGE_MODES:
+            raise HTTPException(status_code=422, detail="Unknown storage mode.")
+        store.set_storage_mode(payload.mode)
+        logger.info("Answer storage mode set to %s", payload.mode)
+    if payload.trial_mode is not None:
+        store.set_trial_mode(payload.trial_mode)
+        logger.info("Trial mode set to %s", payload.trial_mode)
+    return {
+        "ok": True,
+        "poi_storage_mode": store.storage_mode(),
+        "trial_mode": store.trial_mode(),
+    }
+
+
+@app.get("/api/trial")
+def trial_state(request: Request) -> dict[str, Any]:
+    """Whether this visitor may still practise without signing in.
+
+    A signed-in delegate is never gated: the whole point of the trial is that the
+    practice after it happens under an account.
+    """
+    user = optional_user(request)
+    store = get_store()
+    mode = store.trial_mode()
+    used = 0 if user is not None else store.trial_practices(visitor_id(request))
+    return {
+        "trial_mode": mode,
+        "signed_in": user is not None,
+        "used": used,
+        "allowed": (not mode) or user is not None or used == 0,
+        "notice": TRIAL_SIGNIN_COPY,
+    }
 
 
 HK = timezone(timedelta(hours=8))
@@ -1096,6 +1156,7 @@ def admin_stats(
         day["cost_usd"] = _cost_usd(day["prompt_tokens"], day["completion_tokens"])
 
     stats["storage_mode"] = store.storage_mode()
+    stats["trial_mode"] = store.trial_mode()
     stats["model"] = DEEPSEEK_MODEL
     stats["generated_at"] = datetime.now(timezone.utc).isoformat()
     return stats
@@ -1269,6 +1330,14 @@ def grade_poi(payload: POIRequest, request: Request) -> dict[str, Any]:
     # that is present is verified here, and the verified account is what the rate
     # limiter charges, so one delegate cannot be throttled by a shared campus IP.
     user = optional_user(request)
+    # Trial mode: a visitor without an account gets one practice. The second is
+    # refused here rather than in the browser, so the gate cannot be skipped by a
+    # client that never asks.
+    if user is None:
+        trial_store = get_store()
+        if trial_store.trial_mode():
+            if trial_store.claim_trial(visitor_id(request), client_identifier(request)) > 1:
+                raise HTTPException(status_code=403, detail=TRIAL_SIGNIN_COPY)
     retry_after = grade_limiter.retry_after(
         user["sub"] if user else client_identifier(request)
     )

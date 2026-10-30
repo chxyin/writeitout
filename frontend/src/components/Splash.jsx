@@ -134,7 +134,9 @@ export default function Splash({
   // the pickers, so leaving a task and coming back keeps the same setup.
   initialSettings = null,
   // Bumped by App when a session has just been closed, so the list refetches.
-  historyVersion = 0
+  historyVersion = 0,
+  // Trial mode's one-line notice, or empty when it is off (or signed in).
+  trialNote = ''
 }) {
   const user = session;
   const isLoggedIn = Boolean(session);
@@ -426,6 +428,7 @@ export default function Splash({
             >
               Play
             </button>
+            {trialNote && <p className="trial-note">{trialNote}</p>}
           </div>
         </div>
       </div>

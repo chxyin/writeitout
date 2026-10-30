@@ -20,7 +20,7 @@ import GoogleSignInButton from './GoogleSignInButton.jsx';
 import UserDrawer from './UserDrawer.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
 import { fetchAdminStats, downloadSummaryCsv, STATS_RANGES } from '../lib/stats.js';
-import { saveStorageMode } from '../lib/practice.js';
+import { saveStorageMode, saveTrialMode } from '../lib/practice.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 import { goHome } from '../lib/route.js';
 
@@ -190,6 +190,11 @@ export default function AdminStats({
   const [storageMode, setStorageMode] = useState(null);
   const [storageSaving, setStorageSaving] = useState(false);
   const [storageError, setStorageError] = useState('');
+  // Trial mode: one anonymous practice, then a sign-in. Same idea as the answer
+  // switch — a deployment policy that should not need a redeploy to change.
+  const [trialMode, setTrialMode] = useState(null);
+  const [trialSaving, setTrialSaving] = useState(false);
+  const [trialError, setTrialError] = useState('');
   const { isMobile, isTablet, orientation } = useBreakpoint();
   const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
 
@@ -259,6 +264,22 @@ export default function AdminStats({
     if (!saved || !saved.ok) {
       setStorageMode(previous);
       setStorageError('That setting could not be saved. Try again.');
+    }
+  };
+
+  const trialValue = trialMode !== null ? trialMode : Boolean(data && data.trial_mode);
+
+  const chooseTrial = async (enabled) => {
+    if (enabled === trialValue || trialSaving) return;
+    const previous = trialMode;
+    setTrialMode(enabled);
+    setTrialSaving(true);
+    setTrialError('');
+    const saved = await saveTrialMode(enabled);
+    setTrialSaving(false);
+    if (!saved || !saved.ok) {
+      setTrialMode(previous);
+      setTrialError('That setting could not be saved. Try again.');
     }
   };
 
@@ -1006,6 +1027,39 @@ export default function AdminStats({
                   <p className="stats-footnote">
                     {storageSaving ? 'Saving…' : 'Changes take effect immediately.'}
                   </p>
+
+                  <h2 className="stats-panel-title stats-panel-title-spaced">Trial mode</h2>
+                  <p className="stats-panel-note">
+                    While this is on, a visitor who has not signed in gets one practice, tracked
+                    by a cookie and their address. The next attempt asks for the Google sign-in
+                    instead. Signed-in delegates are never limited.
+                  </p>
+                  <div className="stats-choice" role="group" aria-label="Trial mode">
+                    {[
+                      { on: false, label: 'Off', hint: 'Anyone can practise without an account.' },
+                      {
+                        on: true,
+                        label: 'One practice, then sign in',
+                        hint: 'The gate explains why, in the words on the sign-in card.'
+                      }
+                    ].map((choice) => {
+                      const active = trialValue === choice.on;
+                      return (
+                        <button
+                          key={String(choice.on)}
+                          type="button"
+                          className={`stats-choice-btn ${active ? 'is-active' : ''}`.trim()}
+                          aria-pressed={active}
+                          disabled={trialSaving}
+                          onClick={() => chooseTrial(choice.on)}
+                        >
+                          <span className="stats-choice-label">{choice.label}</span>
+                          <span className="stats-choice-hint">{choice.hint}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {trialError && <p className="auth-error" role="alert">{trialError}</p>}
                 </section>
 
                 <p className="stats-footnote">

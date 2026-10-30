@@ -7,6 +7,7 @@
  */
 
 import { authorizationHeaders } from './auth.js';
+import { visitorId } from './trial.js';
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
@@ -33,7 +34,10 @@ async function request(
       method,
       headers: {
         ...(body ? { 'Content-Type': 'application/json' } : null),
-        ...authorizationHeaders()
+        ...authorizationHeaders(),
+        // The trial's counter. It is only read by the grade endpoint, and only
+        // when the deployment has trial mode on.
+        'X-Visitor': visitorId()
       },
       body: body ? JSON.stringify(body) : undefined,
       // A keepalive request is allowed to outlive the document, which is what

@@ -154,6 +154,22 @@ God Mode is not read-only. Each run carries three developer actions:
 Session-level numbers (runs per sitting, finish rate) still include a session
 whose runs were excluded: those describe the sitting, not the marked answers.
 
+## Trial mode
+
+A switch on `#/admin` (beside the storage policy) that limits visitors without an
+account to **one practice**, then asks them to sign in.
+
+- The id is a cookie this page sets for itself (`writeitout_visitor`, a year,
+  `SameSite=Lax`) and sends as `X-Visitor`, because the API is on another origin
+  and a cookie it set would be third-party and dropped. The address is stored
+  beside it in `trial_visits`; a browser with no cookie at all is counted by a
+  hash of its address instead, so the gate still exists.
+- The gate is enforced in `POST /api/grade`, not in the browser: a second
+  anonymous practice is a 403 carrying the explanation. Signed-in delegates are
+  never limited, and turning the switch off restores anonymous practice at once.
+- The card's wording lives in `TRIAL_SIGNIN_COPY` on the server, so the API and
+  the page cannot drift apart.
+
 ## Privacy
 
 The one place a raw address is kept is `user_ips`, written when a delegate signs

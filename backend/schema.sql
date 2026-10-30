@@ -128,6 +128,20 @@ create table if not exists app_settings (
   updated_at  timestamptz not null default now()
 );
 
+-- Trial mode: when it is on, a visitor who is not signed in gets one practice.
+-- `visitor` is the id the browser keeps in its own cookie (so it is first-party
+-- and survives the modern cookie rules); `ip` is recorded beside it so the
+-- developer view can see where a trial came from, and so a browser with no
+-- cookie at all can still be counted.
+create table if not exists trial_visits (
+  visitor    text primary key,
+  ip         text,
+  practices  integer not null default 0,
+  first_seen timestamptz not null default now(),
+  last_seen  timestamptz not null default now()
+);
+create index if not exists trial_visits_ip_idx on trial_visits (ip);
+
 -- Which addresses an account has used, so the developer view can tie a person to
 -- where they practised from. One row per (account, address); the request counter
 -- is what makes a shared school network readable as "this is the same building".

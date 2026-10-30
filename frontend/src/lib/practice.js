@@ -273,6 +273,15 @@ export async function rateSession(id, rating) {
   }
 }
 
+/** The trial's state for this browser: mode on, and whether the free practice is spent. */
+export async function fetchTrialState() {
+  try {
+    return await api.get('/api/trial', { timeoutMs: 6000 });
+  } catch {
+    return null;
+  }
+}
+
 /** The delegate's answer-storage preference. */
 export async function saveAnswerPreference(storeAnswers) {
   try {
@@ -301,6 +310,15 @@ export async function fetchDeploymentSettings() {
 export async function saveStorageMode(mode) {
   try {
     return await api.patch('/api/admin/settings', { mode });
+  } catch {
+    return null;
+  }
+}
+
+/** Admin: whether an anonymous visitor gets one practice before the sign-in. */
+export async function saveTrialMode(enabled) {
+  try {
+    return await api.patch('/api/admin/settings', { trial_mode: Boolean(enabled) });
   } catch {
     return null;
   }
