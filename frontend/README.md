@@ -139,6 +139,21 @@ The completion card also asks one question — "Was this useful?" with **Yes** a
 *answered* sittings marked useful; a delegate who closes the card without tapping
 counts as neither, because no answer is not a no.
 
+### Overwriting a run
+
+God Mode is not read-only. Each run carries three developer actions:
+
+- **Score** — type a new mark and leave the box; `PATCH /api/admin/reps/{id}`
+  replaces the chair's number.
+- **Exclude from stats** — `reps.excluded`. The run stays in the list, greyed and
+  tagged, so it can be put back, but every aggregate (counts, average, spread,
+  topics, spend, clock use) ignores it. The delegate's own counters are rebuilt
+  from the runs that still count, so the two can never disagree.
+- **Delete** — `DELETE /api/admin/reps/{id}`, permanent, and it asks first.
+
+Session-level numbers (runs per sitting, finish rate) still include a session
+whose runs were excluded: those describe the sitting, not the marked answers.
+
 ## Privacy
 
 The one place a raw address is kept is `user_ips`, written when a delegate signs

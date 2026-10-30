@@ -482,6 +482,13 @@ class RatingRequest(BaseModel):
     rating: int = Field(ge=0, le=1)
 
 
+class RepAdminPatch(BaseModel):
+    """What a developer may overwrite on a run: its mark, or whether it counts."""
+
+    excluded: bool | None = None
+    score: float | None = Field(default=None, ge=0, le=10)
+
+
 class EventItem(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     props: dict[str, Any] = Field(default_factory=dict)
@@ -1092,6 +1099,36 @@ def admin_stats(
     stats["model"] = DEEPSEEK_MODEL
     stats["generated_at"] = datetime.now(timezone.utc).isoformat()
     return stats
+
+
+@app.patch("/api/admin/reps/{rep_id}")
+def admin_patch_rep(rep_id: str, payload: RepAdminPatch, request: Request) -> dict[str, Any]:
+    """Admin only: overwrite one run — its mark, or whether it counts at all.
+
+    Excluding keeps the row (so it can be put back) and drops it from every
+    aggregate; deleting removes it. Either way the delegate's counters are rebuilt
+    from the runs that remain, so no page can disagree with another.
+    """
+    require_admin(request)
+    if payload.excluded is None and payload.score is None:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    updated = get_store().admin_set_rep(
+        _session_id(rep_id), excluded=payload.excluded, score=payload.score
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Unknown run.")
+    logger.info("A run was changed from the developer view")
+    return {"ok": True, "rep": updated}
+
+
+@app.delete("/api/admin/reps/{rep_id}")
+def admin_delete_rep(rep_id: str, request: Request) -> dict[str, Any]:
+    """Admin only: delete one run. Permanent — there is no undo behind this."""
+    require_admin(request)
+    if not get_store().admin_delete_rep(_session_id(rep_id)):
+        raise HTTPException(status_code=404, detail="Unknown run.")
+    logger.info("A run was deleted from the developer view")
+    return {"ok": True}
 
 
 @app.get("/api/admin/users/{user_sub}")

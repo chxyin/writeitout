@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAdminUser, downloadRepsCsv } from '../lib/stats.js';
+import { fetchAdminUser, downloadRepsCsv, patchRep, deleteRep } from '../lib/stats.js';
 
 /** 1,234 → "1,234"; missing → "—". */
 function count(value) {
@@ -56,15 +56,25 @@ function seconds(ms) {
 }
 
 /** One run. Everything long is folded away, because the list can be hundreds. */
-function RepCard({ rep }) {
+function RepCard({ rep, busy, onExclude, onDelete, onScore }) {
+  const [confirming, setConfirming] = useState(false);
+
+  const save = (raw) => {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0 || value > 10) return;
+    if (value === Number(rep.score)) return;
+    onScore(rep.id, value);
+  };
+
   return (
-    <details className="user-rep">
+    <details className={`user-rep ${rep.excluded ? 'is-excluded' : ''}`.trim()}>
       <summary className="user-rep-head">
         <span className={`user-rep-score ${rep.score >= 7 ? 'is-high' : rep.score >= 5 ? 'is-mid' : 'is-low'}`}>
           {rep.score === null ? '—' : `${rep.score}`}
         </span>
         <span className="user-rep-topic">{rep.topic || 'Practice'}</span>
         <span className="user-rep-meta">
+          {rep.excluded && <span className="user-rep-tag is-excluded">excluded</span>}
           {rep.committee && <span className="user-rep-tag">{rep.committee}</span>}
           {rep.timed_out && <span className="user-rep-tag is-warn">buzzer</span>}
           <span className="user-rep-when">{when(rep.created_at)}</span>
@@ -108,14 +118,80 @@ function RepCard({ rep }) {
             <p className="user-rep-text">{rep.rewritten_poi}</p>
           </div>
         )}
+
+        {/* Developer actions. Excluding is reversible and only hides the run from
+            the statistics; deleting cannot be undone, so it asks first. */}
+        <div className="user-rep-actions">
+          <label className="user-rep-override">
+            <span>Score</span>
+            <input
+              // Uncontrolled and keyed by the stored mark: a re-read after a save
+              // remounts it on the new value, and typing in between is never
+              // overwritten by a render.
+              key={String(rep.score)}
+              type="number"
+              min="0"
+              max="10"
+              step="0.5"
+              defaultValue={rep.score === null ? '' : String(rep.score)}
+              disabled={busy}
+              onBlur={(event) => save(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="user-rep-action"
+            disabled={busy}
+            onClick={() => onExclude(rep.id, !rep.excluded)}
+          >
+            {rep.excluded ? 'Include again' : 'Exclude from stats'}
+          </button>
+          {confirming ? (
+            <>
+              <button
+                type="button"
+                className="user-rep-action is-danger"
+                disabled={busy}
+                onClick={() => onDelete(rep.id)}
+              >
+                Delete forever
+              </button>
+              <button
+                type="button"
+                className="user-rep-action is-quiet"
+                disabled={busy}
+                onClick={() => setConfirming(false)}
+              >
+                Keep
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="user-rep-action is-quiet"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Delete
+            </button>
+          )}
+        </div>
       </div>
     </details>
   );
 }
 
-export default function UserDrawer({ sub, onClose }) {
+export default function UserDrawer({ sub, onClose, onChanged = null }) {
   const [loaded, setLoaded] = useState({ sub: '', data: null, status: 'loading', message: '' });
   const [filter, setFilter] = useState('');
+  // Bumped after every write so the drawer re-reads itself; the dashboard behind
+  // it is refreshed through `onChanged`.
+  const [token, setToken] = useState(0);
+  const [busyId, setBusyId] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +206,22 @@ export default function UserDrawer({ sub, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [sub]);
+  }, [sub, token]);
+
+  // One place for the three writes: mark the row busy, run it, then refresh — or
+  // say why it was refused.
+  const act = async (id, work) => {
+    setBusyId(id);
+    setActionError('');
+    const result = await work();
+    setBusyId('');
+    if (!result.ok) {
+      setActionError(result.message);
+      return;
+    }
+    setToken((current) => current + 1);
+    if (onChanged) onChanged();
+  };
 
   // Escape closes the drawer, and the page behind it stops scrolling while it is
   // open — otherwise a phone scrolls the dashboard under the sheet.
@@ -285,16 +376,23 @@ export default function UserDrawer({ sub, onClose }) {
                 />
               )}
 
-              {visible.length === 0 ? (
-                <p className="stats-empty">
-                  {reps.length === 0
-                    ? 'Nothing submitted yet.'
-                    : 'No run matches that filter.'}
-                </p>
+              {actionError && <p className="auth-error" role="alert">{actionError}</p>}
+
+              {reps.length === 0 ? (
+                <p className="stats-empty">Nothing submitted yet.</p>
+              ) : visible.length === 0 ? (
+                <p className="stats-empty">No run matches that filter.</p>
               ) : (
                 <div className="user-reps">
                   {visible.map((rep, position) => (
-                    <RepCard rep={rep} key={rep.id || position} />
+                    <RepCard
+                      rep={rep}
+                      key={rep.id || position}
+                      busy={busyId === rep.id}
+                      onExclude={(id, next) => act(id, () => patchRep(id, { excluded: next }))}
+                      onDelete={(id) => act(id, () => deleteRep(id))}
+                      onScore={(id, value) => act(id, () => patchRep(id, { score: value }))}
+                    />
                   ))}
                 </div>
               )}

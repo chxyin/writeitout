@@ -180,6 +180,24 @@ class Store:
         """Everything that account has ever submitted, newest first."""
         raise NotImplementedError
 
+    def admin_set_rep(
+        self,
+        rep_id: str,
+        *,
+        excluded: bool | None = None,
+        score: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Overwrite one run: hide it from the statistics, or change its mark.
+
+        Either way the delegate's own totals are recounted from what is left, so
+        the dashboard and the delegate's profile cannot disagree.
+        """
+        raise NotImplementedError
+
+    def admin_delete_rep(self, rep_id: str) -> bool:
+        """Remove one run for good. False when there was nothing to remove."""
+        raise NotImplementedError
+
     # -- telemetry ---------------------------------------------------------- #
     def add_tick(self, sub: str, session_id: str | None) -> None:
         raise NotImplementedError
@@ -461,7 +479,11 @@ class MemoryStore(Store):
             delegate = self._delegates.get(sub)
             if delegate is None:
                 return None
-            reps = [dict(r) for r in self._reps.values() if r["user_sub"] == sub]
+            reps = [
+                dict(r)
+                for r in self._reps.values()
+                if r["user_sub"] == sub and not r.get("excluded")
+            ]
             ticks = [t for t in self._ticks if t["user_sub"] == sub]
             ips = {
                 ip: dict(entry) for ip, entry in (self._ips.get(sub) or {}).items()
@@ -530,10 +552,58 @@ class MemoryStore(Store):
                     "completion_tokens": int(rep.get("completion_tokens") or 0),
                     "model": rep.get("model") or "",
                     "seconds_per_rep": int(session.get("seconds_per_rep") or 0),
+                    "excluded": bool(rep.get("excluded")),
                     "session_completed": bool(session.get("completed")),
                 }
             )
         return out
+
+    def _recount(self, sub: str) -> None:
+        with self._lock:
+            delegate = self._delegates.get(sub)
+            if delegate is None:
+                return
+            live = [
+                r
+                for r in self._reps.values()
+                if r["user_sub"] == sub and not r.get("excluded")
+            ]
+            delegate["total_reps"] = len(live)
+            delegate["score_sum"] = sum(float(r["score"]) for r in live)
+            delegate["best_score"] = max((float(r["score"]) for r in live), default=None)
+
+    def admin_set_rep(
+        self,
+        rep_id: str,
+        *,
+        excluded: bool | None = None,
+        score: float | None = None,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            rep = self._reps.get(rep_id)
+            if rep is None:
+                return None
+            if excluded is not None:
+                rep["excluded"] = bool(excluded)
+            if score is not None:
+                rep["score"] = float(score)
+            sub = rep["user_sub"]
+            out = {
+                "id": rep_id,
+                "excluded": bool(rep.get("excluded")),
+                "score": float(rep["score"]),
+            }
+        self._recount(sub)
+        return out
+
+    def admin_delete_rep(self, rep_id: str) -> bool:
+        with self._lock:
+            rep = self._reps.pop(rep_id, None)
+            if rep is None:
+                return False
+            sub = rep["user_sub"]
+        self._recount(sub)
+        return True
 
     def admin_stats(self, start: datetime, end: datetime) -> dict[str, Any]:
         """Aggregates over a half-open window [start, end), Hong Kong time."""
@@ -546,7 +616,9 @@ class MemoryStore(Store):
             reps = [dict(r) for r in self._reps.values()]
             ticks = [dict(t) for t in self._ticks]
 
-        recent_reps = [r for r in reps if since <= r["created_at"] < end]
+        recent_reps = [
+            r for r in reps if since <= r["created_at"] < end and not r.get("excluded")
+        ]
         recent_sessions = [s for s in sessions if since <= s["started_at"] < end]
         recent_ticks = [t for t in ticks if since <= t["created_at"] < end]
         scores = sorted(float(r["score"]) for r in recent_reps)
@@ -603,7 +675,9 @@ class MemoryStore(Store):
             key=lambda row: (-row["reps"], row["topic"]),
         )[:8]
 
-        busiest = sorted(delegates, key=lambda d: int(d.get("total_reps") or 0), reverse=True)[:8]
+        busiest = sorted(
+            delegates, key=lambda d: int(d.get("total_reps") or 0), reverse=True
+        )[:200]
         delegate_rows = [
             {
                 "sub": str(delegate.get("user_sub") or ""),
@@ -622,6 +696,9 @@ class MemoryStore(Store):
                 ),
                 "longest_streak": int(delegate.get("longest_streak") or 0),
                 "last_seen_at": _iso(delegate.get("last_seen_at")),
+                "last_practice_on": _iso(delegate.get("last_practice_on")),
+                "created_at": _iso(delegate.get("created_at")),
+                "store_answers": bool(delegate.get("store_answers", True)),
             }
             for delegate in busiest
         ]
@@ -1287,6 +1364,61 @@ class PostgresStore(Store):
             ],
         }
 
+    def admin_set_rep(
+        self,
+        rep_id: str,
+        *,
+        excluded: bool | None = None,
+        score: float | None = None,
+    ) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                update reps set
+                    excluded = coalesce(%s, excluded),
+                    score = coalesce(%s, score)
+                where id = %s
+                returning id, user_sub, excluded, score
+                """,
+                (excluded, score, rep_id),
+            ).fetchone()
+        if row is None:
+            return None
+        self.recount_delegate(row["user_sub"])
+        return {
+            "id": str(row["id"]),
+            "excluded": bool(row["excluded"]),
+            "score": float(row["score"]),
+        }
+
+    def admin_delete_rep(self, rep_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "delete from reps where id = %s returning user_sub", (rep_id,)
+            ).fetchone()
+        if row is None:
+            return False
+        self.recount_delegate(row["user_sub"])
+        return True
+
+    def recount_delegate(self, sub: str) -> None:
+        """Rebuild the delegate's counters from the runs that still count."""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                update delegates d set
+                    total_reps = c.n,
+                    score_sum = coalesce(c.total, 0),
+                    best_score = c.best
+                from (
+                    select count(*) as n, sum(score) as total, max(score) as best
+                    from reps where user_sub = %s and not excluded
+                ) c
+                where d.user_sub = %s
+                """,
+                (sub, sub),
+            )
+
     def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -1297,7 +1429,7 @@ class PostgresStore(Store):
                        r.latency_ms, r.write_ms, r.prompt_tokens, r.completion_tokens,
                        r.model, r.created_at,
                        coalesce(s.seconds_per_rep, 0) as seconds_per_rep,
-                       coalesce(s.completed, false) as session_completed
+                       coalesce(s.completed, false) as session_completed, r.excluded
                 from reps r
                 left join practice_sessions s on s.id = r.session_id
                 where r.user_sub = %s
@@ -1329,6 +1461,7 @@ class PostgresStore(Store):
                 "completion_tokens": int(row.get("completion_tokens") or 0),
                 "model": row.get("model") or "",
                 "seconds_per_rep": int(row.get("seconds_per_rep") or 0),
+                "excluded": bool(row.get("excluded")),
                 "session_completed": bool(row.get("session_completed")),
             }
             for row in rows
@@ -1401,7 +1534,7 @@ class PostgresStore(Store):
                     coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                     coalesce(sum(completion_tokens), 0) as completion_tokens
                 from reps
-                where created_at >= %s and created_at < %s
+                where created_at >= %s and created_at < %s and not excluded
                 """,
                 (start, end),
             ).fetchone()
@@ -1433,7 +1566,7 @@ class PostgresStore(Store):
                        coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                        coalesce(sum(completion_tokens), 0) as completion_tokens
                 from reps
-                where created_at >= %s and created_at < %s
+                where created_at >= %s and created_at < %s and not excluded
                 group by 1
                 """,
                 (start, end),
@@ -1468,7 +1601,7 @@ class PostgresStore(Store):
                     select greatest(1, least(10, round(score)::int)) as score,
                            count(*) as reps
                     from reps
-                    where created_at >= %s and created_at < %s
+                    where created_at >= %s and created_at < %s and not excluded
                     group by 1
                     """,
                     (start, end),
@@ -1479,7 +1612,7 @@ class PostgresStore(Store):
                 f"""
                 select topic, count(*) as reps, avg(score) as avg_score
                 from reps
-                where created_at >= %s and created_at < %s and topic is not null
+                where created_at >= %s and created_at < %s and not excluded and topic is not null
                 group by 1
                 order by reps desc, topic
                 limit 8
@@ -1490,10 +1623,11 @@ class PostgresStore(Store):
             busiest = conn.execute(
                 """
                 select user_sub, email, display_name, total_reps, score_sum, best_score,
-                       longest_streak, last_seen_at
+                       longest_streak, last_seen_at, last_practice_on, created_at,
+                       store_answers
                 from delegates
                 order by total_reps desc, last_seen_at desc
-                limit 8
+                limit 200
                 """
             ).fetchall()
 
@@ -1650,7 +1784,7 @@ class PostgresStore(Store):
                     ) as median_share,
                     avg(r.write_ms) / 1000.0 as avg_seconds
                 from reps r join practice_sessions s on s.id = r.session_id
-                where r.created_at >= %s and created_at < %s
+                where r.created_at >= %s and r.created_at < %s and not r.excluded
                   and r.write_ms is not null
                   and s.seconds_per_rep > 0
                 """,
@@ -1703,6 +1837,9 @@ class PostgresStore(Store):
                     "best_score": number(row.get("best_score")),
                     "longest_streak": whole(row.get("longest_streak")),
                     "last_seen_at": _iso(row.get("last_seen_at")),
+                    "last_practice_on": _iso(row.get("last_practice_on")),
+                    "created_at": _iso(row.get("created_at")),
+                    "store_answers": bool(row.get("store_answers", True)),
                 }
             )
 

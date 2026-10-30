@@ -118,6 +118,48 @@ const STORAGE_CHOICES = [
   { mode: 'off', label: 'Scores only', hint: 'Only marks and counts are stored. The text is dropped as it is written.' }
 ];
 
+// The delegate table's filters. Each one is a question a developer actually asks
+// of this list ("who never came back", "whose scores are stuck below 5"), and
+// ticking several narrows the list — they are read as AND, which is what a
+// checkbox row implies.
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const DELEGATE_FILTERS = [
+  { id: 'practised', label: 'Has practised', test: (row) => row.reps > 0 },
+  { id: 'never', label: 'Never practised', test: (row) => !row.reps },
+  {
+    id: 'new',
+    label: 'New in window',
+    test: (row, start) => Boolean(row.created_at && start && row.created_at.slice(0, 10) >= start)
+  },
+  {
+    id: 'quiet',
+    label: 'Quiet 14+ days',
+    // A delegate who never practised is "never", not "quiet": that is a
+    // different problem and it has its own filter.
+    test: (row) =>
+      Boolean(
+        row.reps > 0 &&
+          (!row.last_practice_on ||
+            (Date.parse(`${todayIso()}T00:00:00`) - Date.parse(`${row.last_practice_on}T00:00:00`)) /
+              86_400_000 >
+              14)
+      )
+  },
+  {
+    id: 'low',
+    label: 'Average under 5',
+    test: (row) => Number.isFinite(row.average_score) && row.average_score < 5
+  },
+  {
+    id: 'high',
+    label: 'Average 7 or better',
+    test: (row) => Number.isFinite(row.average_score) && row.average_score >= 7
+  },
+  { id: 'streak', label: 'Streak of 3+', test: (row) => Number(row.longest_streak) >= 3 },
+  { id: 'optedOut', label: 'Answers not stored', test: (row) => row.store_answers === false }
+];
+
 export default function AdminStats({
   session = null,
   onSignIn,
@@ -131,6 +173,10 @@ export default function AdminStats({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [openUser, setOpenUser] = useState(null);
+  // Which delegate filters are ticked, as ids. Independent of the date window:
+  // the window chooses the numbers, the ticks choose the rows.
+  const [rowsFilter, setRowsFilter] = useState([]);
+  const [rowSearch, setRowSearch] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);
   const [reload, setReload] = useState(0);
   // One object for the fetch, keyed by the request it belongs to. Nothing has to
@@ -221,6 +267,16 @@ export default function AdminStats({
   const busiestDay = Math.max(1, ...daily.map((day) => day.reps));
   const busiestScore = Math.max(1, ...scores.map((row) => row.reps));
   const busiestDropoff = Math.max(1, ...((habits && habits.dropoff) || []).map((row) => row.sessions));
+
+  // Every ticked filter has to pass, and the search box has to match either the
+  // name or the address.
+  const shownDelegates = delegates.filter((row) => {
+    const ticked = DELEGATE_FILTERS.filter((filter) => rowsFilter.includes(filter.id));
+    if (!ticked.every((filter) => filter.test(row, data && data.start))) return false;
+    const needle = rowSearch.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.name || ''} ${row.email || ''}`.toLowerCase().includes(needle);
+  });
 
   const handleSignIn = async ({ credential }) => {
     setAuthError('');
@@ -826,18 +882,72 @@ export default function AdminStats({
 
                 <section className="stats-panel">
                   <div className="stats-panel-head">
-                    <h2 className="stats-panel-title">Busiest delegates</h2>
+                    <h2 className="stats-panel-title">
+                      Delegates{' '}
+                      <span className="stats-panel-count">
+                        {formatCount(shownDelegates.length)} of {formatCount(delegates.length)}
+                      </span>
+                    </h2>
                     <button
                       type="button"
                       className="stats-choice-btn is-inline"
-                      onClick={() => downloadSummaryCsv(delegates, new Date().toISOString().slice(0, 10))}
-                      disabled={delegates.length === 0}
+                      onClick={() => downloadSummaryCsv(shownDelegates, new Date().toISOString().slice(0, 10))}
+                      disabled={shownDelegates.length === 0}
                     >
                       Download CSV
                     </button>
                   </div>
+
+                  <div className="stats-filters" role="group" aria-label="Filter delegates">
+                    {DELEGATE_FILTERS.map((filter) => {
+                      const active = rowsFilter.includes(filter.id);
+                      return (
+                        <label
+                          key={filter.id}
+                          className={`stats-filter ${active ? 'is-active' : ''}`.trim()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() =>
+                              setRowsFilter((current) =>
+                                current.includes(filter.id)
+                                  ? current.filter((id) => id !== filter.id)
+                                  : [...current, filter.id]
+                              )
+                            }
+                          />
+                          <span>{filter.label}</span>
+                        </label>
+                      );
+                    })}
+                    {(rowsFilter.length > 0 || rowSearch) && (
+                      <button
+                        type="button"
+                        className="stats-filter is-clear"
+                        onClick={() => {
+                          setRowsFilter([]);
+                          setRowSearch('');
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    className="user-search"
+                    type="search"
+                    placeholder="Search name or email..."
+                    aria-label="Search delegates"
+                    value={rowSearch}
+                    onChange={(event) => setRowSearch(event.target.value)}
+                  />
+
                   {delegates.length === 0 ? (
                     <p className="stats-empty">No accounts yet.</p>
+                  ) : shownDelegates.length === 0 ? (
+                    <p className="stats-empty">No delegate matches those filters.</p>
                   ) : (
                     <div className="stats-table">
                       <div className="stats-table-head">
@@ -846,7 +956,7 @@ export default function AdminStats({
                         <span className="stats-num">Avg</span>
                         <span className="stats-num">Best</span>
                       </div>
-                      {delegates.map((row) => (
+                      {shownDelegates.map((row) => (
                         <button
                           type="button"
                           className="stats-table-row is-clickable"
@@ -908,7 +1018,15 @@ export default function AdminStats({
         )}
       </div>
 
-      {openUser && <UserDrawer sub={openUser} onClose={() => setOpenUser(null)} />}
+      {openUser && (
+        <UserDrawer
+          sub={openUser}
+          onClose={() => setOpenUser(null)}
+          // A deleted or excluded run changes every number on this page, so the
+          // dashboard re-reads itself while the drawer stays open.
+          onChanged={() => setReload((count) => count + 1)}
+        />
+      )}
     </div>
   );
 }

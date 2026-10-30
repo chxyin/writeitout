@@ -60,6 +60,28 @@ export async function fetchAdminUser(sub) {
   }
 }
 
+/**
+ * Overwrite one run: `{ excluded }` takes it out of (or back into) every
+ * statistic, `{ score }` replaces the chair's mark. The server recounts the
+ * delegate either way.
+ */
+export async function patchRep(id, body) {
+  try {
+    return { ok: true, data: await api.patch(`/api/admin/reps/${encodeURIComponent(id)}`, body) };
+  } catch (error) {
+    return { ok: false, message: (error && error.message) || 'That change was refused.' };
+  }
+}
+
+/** Delete one run for good. There is no undo behind this. */
+export async function deleteRep(id) {
+  try {
+    return { ok: true, data: await api.del(`/api/admin/reps/${encodeURIComponent(id)}`) };
+  } catch (error) {
+    return { ok: false, message: (error && error.message) || 'That run could not be deleted.' };
+  }
+}
+
 /** 1,234 → "1,234"; null → "". Used by both CSV writers. */
 function cell(value) {
   if (value === null || value === undefined) return '';
