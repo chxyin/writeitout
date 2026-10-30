@@ -137,6 +137,16 @@ export default function AdminStats({
     };
   }, [days, key, session]);
 
+  // The tab says what the page is, and the app's own title comes back when the
+  // page closes — the same courtesy the replayed session pays.
+  useEffect(() => {
+    const previous = document.title;
+    document.title = 'Statistics · WriteItOut';
+    return () => {
+      document.title = previous;
+    };
+  }, []);
+
   const data = status === 'ready' ? loaded.data : null;
   const totals = data ? data.totals : null;
   const daily = (data && data.daily) || [];
