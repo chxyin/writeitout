@@ -158,13 +158,26 @@ class Store:
     def profile(self, sub: str) -> dict[str, Any] | None:
         raise NotImplementedError
 
-    def admin_stats(self, days: int = 30) -> dict[str, Any]:
+    def admin_stats(self, start: datetime, end: datetime) -> dict[str, Any]:
         """Aggregates for the developer dashboard: totals, the daily series, the
         score spread, topics, and the busiest accounts.
 
         Nothing here is per-answer text: the dashboard is about how the product
         is used, so it can be served whatever the answer-storage mode is.
         """
+        raise NotImplementedError
+
+    # -- admin: one delegate in detail -------------------------------------- #
+    def record_ip(self, sub: str, ip: str) -> None:
+        """Note that this account used this address, now."""
+        raise NotImplementedError
+
+    def admin_user(self, sub: str) -> dict[str, Any] | None:
+        """One delegate in full: identity, totals and the addresses they used."""
+        raise NotImplementedError
+
+    def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
+        """Everything that account has ever submitted, newest first."""
         raise NotImplementedError
 
     # -- telemetry ---------------------------------------------------------- #
@@ -212,6 +225,7 @@ class MemoryStore(Store):
         self._reps: dict[str, dict[str, Any]] = {}
         self._ticks: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._ips: dict[str, dict[str, dict[str, Any]]] = {}
         self._mode = DEFAULT_STORAGE_MODE
 
     def upsert_delegate(self, claims: dict[str, Any]) -> dict[str, Any]:
@@ -432,19 +446,109 @@ class MemoryStore(Store):
         out["active_seconds"] = len(ticks) * 60
         return out
 
-    def admin_stats(self, days: int = 30) -> dict[str, Any]:
-        days = max(1, min(365, int(days)))
-        now = datetime.now(HK)
-        since = now - timedelta(days=days)
+    def record_ip(self, sub: str, ip: str) -> None:
+        if not ip:
+            return
+        with self._lock:
+            seen = self._ips.setdefault(sub, {}).setdefault(
+                ip, {"first_seen": datetime.now(HK), "last_seen": datetime.now(HK), "requests": 0}
+            )
+            seen["last_seen"] = datetime.now(HK)
+            seen["requests"] += 1
+
+    def admin_user(self, sub: str) -> dict[str, Any] | None:
+        with self._lock:
+            delegate = self._delegates.get(sub)
+            if delegate is None:
+                return None
+            reps = [dict(r) for r in self._reps.values() if r["user_sub"] == sub]
+            ticks = [t for t in self._ticks if t["user_sub"] == sub]
+            ips = {
+                ip: dict(entry) for ip, entry in (self._ips.get(sub) or {}).items()
+            }
+        scores = [float(r["score"]) for r in reps]
+        return {
+            "user_sub": sub,
+            "email": delegate.get("email") or "",
+            "name": delegate.get("display_name") or "",
+            "picture": delegate.get("picture_url") or "",
+            "created_at": _iso(delegate.get("created_at")),
+            "last_seen_at": _iso(delegate.get("last_seen_at")),
+            "last_practice_on": _iso(delegate.get("last_practice_on")),
+            "store_answers": bool(delegate.get("store_answers", True)),
+            "reps": len(reps),
+            "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+            "best_score": (
+                float(delegate["best_score"])
+                if delegate.get("best_score") is not None
+                else None
+            ),
+            "prompt_tokens": sum(int(r.get("prompt_tokens") or 0) for r in reps),
+            "completion_tokens": sum(int(r.get("completion_tokens") or 0) for r in reps),
+            "active_seconds": len(ticks) * 60,
+            "ips": [
+                {
+                    "ip": ip,
+                    "first_seen": _iso(entry.get("first_seen")),
+                    "last_seen": _iso(entry.get("last_seen")),
+                    "requests": int(entry.get("requests") or 0),
+                }
+                for ip, entry in sorted(
+                    ips.items(), key=lambda item: item[1]["last_seen"], reverse=True
+                )
+            ],
+        }
+
+    def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
+        with self._lock:
+            reps = [dict(r) for r in self._reps.values() if r["user_sub"] == sub]
+            sessions = {str(s["id"]): dict(s) for s in self._sessions.values()}
+        reps.sort(key=lambda r: r["created_at"], reverse=True)
+        out = []
+        for rep in reps[:limit]:
+            session = sessions.get(str(rep.get("session_id"))) or {}
+            out.append(
+                {
+                    "id": str(rep.get("id") or ""),
+                    "drill_id": rep.get("drill_id") or "",
+                    "topic": rep.get("topic") or "",
+                    "mode": rep.get("mode") or "full",
+                    "score": float(rep["score"]) if rep.get("score") is not None else None,
+                    "timed_out": bool(rep.get("timed_out")),
+                    "created_at": _iso(rep.get("created_at")),
+                    "answer": rep.get("poi") or None,
+                    "answer_chars": int(rep.get("poi_chars") or 0),
+                    "prompt": rep.get("prompt_text") or None,
+                    "grade_label": rep.get("grade_label") or "",
+                    "reasoning": rep.get("reasoning") or "",
+                    "constructive_feedback": rep.get("constructive_feedback") or "",
+                    "rewritten_poi": rep.get("rewritten_poi") or "",
+                    "rewrite_explanation": rep.get("rewrite_explanation") or "",
+                    "latency_ms": rep.get("latency_ms"),
+                    "write_ms": rep.get("write_ms"),
+                    "prompt_tokens": int(rep.get("prompt_tokens") or 0),
+                    "completion_tokens": int(rep.get("completion_tokens") or 0),
+                    "model": rep.get("model") or "",
+                    "seconds_per_rep": int(session.get("seconds_per_rep") or 0),
+                    "session_completed": bool(session.get("completed")),
+                }
+            )
+        return out
+
+    def admin_stats(self, start: datetime, end: datetime) -> dict[str, Any]:
+        """Aggregates over a half-open window [start, end), Hong Kong time."""
+        days = max(1, (end.date() - start.date()).days)
+        now = end
+        since = start
         with self._lock:
             delegates = [dict(d) for d in self._delegates.values()]
             sessions = [dict(s) for s in self._sessions.values()]
             reps = [dict(r) for r in self._reps.values()]
             ticks = [dict(t) for t in self._ticks]
 
-        recent_reps = [r for r in reps if r["created_at"] >= since]
-        recent_sessions = [s for s in sessions if s["started_at"] >= since]
-        recent_ticks = [t for t in ticks if t["created_at"] >= since]
+        recent_reps = [r for r in reps if since <= r["created_at"] < end]
+        recent_sessions = [s for s in sessions if since <= s["started_at"] < end]
+        recent_ticks = [t for t in ticks if since <= t["created_at"] < end]
         scores = sorted(float(r["score"]) for r in recent_reps)
         latencies = [
             int(r["latency_ms"]) for r in recent_reps if r.get("latency_ms") is not None
@@ -454,8 +558,8 @@ class MemoryStore(Store):
             return value.astimezone(HK).date()
 
         daily = []
-        for offset in range(days - 1, -1, -1):
-            day = (now - timedelta(days=offset)).date()
+        for offset in range(days):
+            day = start.date() + timedelta(days=offset)
             day_reps = [r for r in recent_reps if day_of(r["created_at"]) == day]
             day_scores = [float(r["score"]) for r in day_reps]
             day_ticks = [t for t in recent_ticks if day_of(t["created_at"]) == day]
@@ -502,6 +606,7 @@ class MemoryStore(Store):
         busiest = sorted(delegates, key=lambda d: int(d.get("total_reps") or 0), reverse=True)[:8]
         delegate_rows = [
             {
+                "sub": str(delegate.get("user_sub") or ""),
                 "email": delegate.get("email") or "",
                 "name": delegate.get("display_name") or "",
                 "reps": int(delegate.get("total_reps") or 0),
@@ -644,6 +749,8 @@ class MemoryStore(Store):
 
         return {
             "days": days,
+            "start": start.date().isoformat(),
+            "end": end.date().isoformat(),
             "totals": {
                 "delegates": len(delegates),
                 "delegates_new": len([d for d in delegates if d["created_at"] >= since]),
@@ -1103,6 +1210,130 @@ class PostgresStore(Store):
         out["active_seconds"] = int(ticks["n"] or 0) * 60
         return out
 
+    def record_ip(self, sub: str, ip: str) -> None:
+        if not ip:
+            return
+        with self._conn() as conn:
+            conn.execute(
+                """
+                insert into user_ips (user_sub, ip) values (%s, %s)
+                on conflict (user_sub, ip) do update
+                    set last_seen = now(), requests = user_ips.requests + 1
+                """,
+                (sub, ip),
+            )
+
+    def admin_user(self, sub: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                select user_sub, email, display_name, picture_url, store_answers,
+                       created_at, last_seen_at, last_practice_on, best_score,
+                       total_active_seconds
+                from delegates where user_sub = %s
+                """,
+                (sub,),
+            ).fetchone()
+            if row is None:
+                return None
+            totals = conn.execute(
+                """
+                select count(*) as reps,
+                       coalesce(sum(prompt_tokens), 0) as prompt_tokens,
+                       coalesce(sum(completion_tokens), 0) as completion_tokens,
+                       avg(score) as avg_score
+                from reps where user_sub = %s
+                """,
+                (sub,),
+            ).fetchone()
+            ips = conn.execute(
+                """
+                select ip, first_seen, last_seen, requests from user_ips
+                where user_sub = %s
+                order by last_seen desc
+                limit 20
+                """,
+                (sub,),
+            ).fetchall()
+        return {
+            "user_sub": sub,
+            "email": row.get("email") or "",
+            "name": row.get("display_name") or "",
+            "picture": row.get("picture_url") or "",
+            "created_at": _iso(row.get("created_at")),
+            "last_seen_at": _iso(row.get("last_seen_at")),
+            "last_practice_on": _iso(row.get("last_practice_on")),
+            "store_answers": bool(row.get("store_answers")),
+            "reps": int(totals["reps"] or 0),
+            "avg_score": (
+                round(float(totals["avg_score"]), 2)
+                if totals["avg_score"] is not None
+                else None
+            ),
+            "best_score": (
+                float(row["best_score"]) if row.get("best_score") is not None else None
+            ),
+            "prompt_tokens": int(totals["prompt_tokens"] or 0),
+            "completion_tokens": int(totals["completion_tokens"] or 0),
+            "active_seconds": int(row.get("total_active_seconds") or 0),
+            "ips": [
+                {
+                    "ip": item["ip"],
+                    "first_seen": _iso(item["first_seen"]),
+                    "last_seen": _iso(item["last_seen"]),
+                    "requests": int(item["requests"] or 0),
+                }
+                for item in ips
+            ],
+        }
+
+    def admin_user_reps(self, sub: str, limit: int = 300) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                select r.id, r.drill_id, r.topic, r.mode, r.score, r.timed_out,
+                       r.poi, r.poi_chars, r.prompt_text, r.grade_label, r.reasoning,
+                       r.constructive_feedback, r.rewritten_poi, r.rewrite_explanation,
+                       r.latency_ms, r.write_ms, r.prompt_tokens, r.completion_tokens,
+                       r.model, r.created_at,
+                       coalesce(s.seconds_per_rep, 0) as seconds_per_rep,
+                       coalesce(s.completed, false) as session_completed
+                from reps r
+                left join practice_sessions s on s.id = r.session_id
+                where r.user_sub = %s
+                order by r.created_at desc
+                limit %s
+                """,
+                (sub, max(1, min(1000, int(limit)))),
+            ).fetchall()
+        return [
+            {
+                "id": str(row.get("id") or ""),
+                "drill_id": row.get("drill_id") or "",
+                "topic": row.get("topic") or "",
+                "mode": row.get("mode") or "full",
+                "score": float(row["score"]) if row.get("score") is not None else None,
+                "timed_out": bool(row.get("timed_out")),
+                "created_at": _iso(row.get("created_at")),
+                "answer": row.get("poi") or None,
+                "answer_chars": int(row.get("poi_chars") or 0),
+                "prompt": row.get("prompt_text") or None,
+                "grade_label": row.get("grade_label") or "",
+                "reasoning": row.get("reasoning") or "",
+                "constructive_feedback": row.get("constructive_feedback") or "",
+                "rewritten_poi": row.get("rewritten_poi") or "",
+                "rewrite_explanation": row.get("rewrite_explanation") or "",
+                "latency_ms": row.get("latency_ms"),
+                "write_ms": row.get("write_ms"),
+                "prompt_tokens": int(row.get("prompt_tokens") or 0),
+                "completion_tokens": int(row.get("completion_tokens") or 0),
+                "model": row.get("model") or "",
+                "seconds_per_rep": int(row.get("seconds_per_rep") or 0),
+                "session_completed": bool(row.get("session_completed")),
+            }
+            for row in rows
+        ]
+
     def add_tick(self, sub: str, session_id: str | None) -> None:
         with self._conn() as conn:
             conn.execute(
@@ -1115,13 +1346,11 @@ class PostgresStore(Store):
                 (sub,),
             )
 
-    def admin_stats(self, days: int = 30) -> dict[str, Any]:
-        days = max(1, min(365, int(days)))
-        # One bind parameter for every window: `%s::int * interval '1 day'` keeps
-        # Postgres from having to infer an untyped parameter's type.
-        window = "(%s::int * interval '1 day')"
+    def admin_stats(self, start: datetime, end: datetime) -> dict[str, Any]:
+        """Aggregates over a half-open window [start, end), Hong Kong time."""
         hk_day = "(created_at at time zone 'Asia/Hong_Kong')::date"
         started_day = "(started_at at time zone 'Asia/Hong_Kong')::date"
+        days = max(1, (end.date() - start.date()).days)
 
         def number(value: Any) -> float | None:
             """numeric comes back as Decimal; the JSON layer wants a float."""
@@ -1135,12 +1364,12 @@ class PostgresStore(Store):
                 f"""
                 select
                     (select count(*) from delegates) as delegates,
-                    (select count(*) from delegates where created_at > now() - {window})
+                    (select count(*) from delegates where created_at >= %s and created_at < %s)
                         as delegates_new,
                     (select count(*) from reps) as reps_all,
                     (select count(*) from practice_sessions) as sessions_all
                 """,
-                (days,),
+                (start, end),
             ).fetchone()
 
             activity = conn.execute(
@@ -1172,9 +1401,9 @@ class PostgresStore(Store):
                     coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                     coalesce(sum(completion_tokens), 0) as completion_tokens
                 from reps
-                where created_at > now() - {window}
+                where created_at >= %s and created_at < %s
                 """,
-                (days,),
+                (start, end),
             ).fetchone()
 
             sessions = conn.execute(
@@ -1184,14 +1413,14 @@ class PostgresStore(Store):
                     count(*) filter (where completed) as sessions_completed,
                     count(*) filter (where ended_at is null) as sessions_open
                 from practice_sessions
-                where started_at > now() - {window}
+                where started_at >= %s and started_at < %s
                 """,
-                (days,),
+                (start, end),
             ).fetchone()
 
             ticks = conn.execute(
-                f"select count(*) as ticks from activity_ticks where created_at > now() - {window}",
-                (days,),
+                f"select count(*) as ticks from activity_ticks where created_at >= %s and created_at < %s",
+                (start, end),
             ).fetchone()
 
             # The daily series: three grouped queries, merged below, rather than
@@ -1204,20 +1433,20 @@ class PostgresStore(Store):
                        coalesce(sum(prompt_tokens), 0) as prompt_tokens,
                        coalesce(sum(completion_tokens), 0) as completion_tokens
                 from reps
-                where created_at > now() - {window}
+                where created_at >= %s and created_at < %s
                 group by 1
                 """,
-                (days,),
+                (start, end),
             ).fetchall()
 
             daily_sessions = conn.execute(
                 f"""
                 select {started_day} as day, count(*) as sessions
                 from practice_sessions
-                where started_at > now() - {window}
+                where started_at >= %s and started_at < %s
                 group by 1
                 """,
-                (days,),
+                (start, end),
             ).fetchall()
 
             daily_ticks = conn.execute(
@@ -1226,10 +1455,10 @@ class PostgresStore(Store):
                        count(distinct user_sub) as active_users,
                        count(*) as ticks
                 from activity_ticks
-                where created_at > now() - {window}
+                where created_at >= %s and created_at < %s
                 group by 1
                 """,
-                (days,),
+                (start, end),
             ).fetchall()
 
             histogram = {
@@ -1239,10 +1468,10 @@ class PostgresStore(Store):
                     select greatest(1, least(10, round(score)::int)) as score,
                            count(*) as reps
                     from reps
-                    where created_at > now() - {window}
+                    where created_at >= %s and created_at < %s
                     group by 1
                     """,
-                    (days,),
+                    (start, end),
                 ).fetchall()
             }
 
@@ -1250,17 +1479,17 @@ class PostgresStore(Store):
                 f"""
                 select topic, count(*) as reps, avg(score) as avg_score
                 from reps
-                where created_at > now() - {window} and topic is not null
+                where created_at >= %s and created_at < %s and topic is not null
                 group by 1
                 order by reps desc, topic
                 limit 8
                 """,
-                (days,),
+                (start, end),
             ).fetchall()
 
             busiest = conn.execute(
                 """
-                select email, display_name, total_reps, score_sum, best_score,
+                select user_sub, email, display_name, total_reps, score_sum, best_score,
                        longest_streak, last_seen_at
                 from delegates
                 order by total_reps desc, last_seen_at desc
@@ -1392,9 +1621,9 @@ class PostgresStore(Store):
                     ) as median_seconds,
                     avg(least(reps_done, reps_target)) as avg_runs
                 from practice_sessions
-                where started_at > now() - {window}
+                where started_at >= %s and started_at < %s
                 """,
-                (days,),
+                (start, end),
             ).fetchone()
 
             # Where the run count lands, bucketed at 8+: the drop-off shape.
@@ -1402,10 +1631,10 @@ class PostgresStore(Store):
                 f"""
                 select least(reps_done, 8) as runs, count(*) as sessions
                 from practice_sessions
-                where started_at > now() - {window}
+                where started_at >= %s and started_at < %s
                 group by 1
                 """,
-                (days,),
+                (start, end),
             ).fetchall()
 
             # How much of the clock the delegate used, for runs that had a clock
@@ -1421,21 +1650,22 @@ class PostgresStore(Store):
                     ) as median_share,
                     avg(r.write_ms) / 1000.0 as avg_seconds
                 from reps r join practice_sessions s on s.id = r.session_id
-                where r.created_at > now() - {window}
+                where r.created_at >= %s and created_at < %s
                   and r.write_ms is not null
                   and s.seconds_per_rep > 0
                 """,
-                (days,),
+                (start, end),
             ).fetchone()
 
         by_day = {row["day"]: row for row in daily_reps}
         sessions_by_day = {row["day"]: row for row in daily_sessions}
         ticks_by_day = {row["day"]: row for row in daily_ticks}
 
-        today = datetime.now(HK).date()
+        # The series covers every Hong Kong day the window touches, so a custom
+        # range that starts at lunchtime still shows the shape of its first day.
         daily = []
-        for offset in range(days - 1, -1, -1):
-            day = today - timedelta(days=offset)
+        for offset in range(days):
+            day = start.date() + timedelta(days=offset)
             rep_row = by_day.get(day) or {}
             session_row = sessions_by_day.get(day) or {}
             tick_row = ticks_by_day.get(day) or {}
@@ -1461,6 +1691,7 @@ class PostgresStore(Store):
             total = whole(row.get("total_reps"))
             delegate_rows.append(
                 {
+                    "sub": str(row.get("user_sub") or ""),
                     "email": row.get("email") or "",
                     "name": row.get("display_name") or "",
                     "reps": total,
@@ -1498,6 +1729,8 @@ class PostgresStore(Store):
 
         return {
             "days": days,
+            "start": start.date().isoformat(),
+            "end": end.date().isoformat(),
             "totals": {
                 "delegates": whole(totals["delegates"]),
                 "delegates_new": whole(totals["delegates_new"]),

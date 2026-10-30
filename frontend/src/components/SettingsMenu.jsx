@@ -107,6 +107,13 @@ export default function SettingsMenu({
   onTextSizeChange,
   cardWidth,
   onCardWidthChange,
+  // Answer storage. Hidden entirely when signed out, because there is no account
+  // to hang the preference on.
+  showAnswerToggle = false,
+  storeAnswers = true,
+  answersLocked = false,
+  answerSaving = false,
+  onToggleAnswers,
   onResetDefaults,
   settingsAreDefault
 }) {
@@ -220,6 +227,36 @@ export default function SettingsMenu({
                   <span className="toggle-knob-sm" />
                 </button>
               </div>
+
+              {/* The one setting that is about the account rather than the screen:
+                  it lives here because this is where a delegate looks for "what
+                  this app does with my stuff". It is worded as the opt-out, so the
+                  switch being on matches the thing being asked for. */}
+              {showAnswerToggle && (
+                <div className="setting-item is-stacked">
+                  <div className="setting-copy">
+                    <span>Don’t save my answers</span>
+                    <small>
+                      {answersLocked
+                        ? 'This deployment keeps scores only, so nothing is stored either way.'
+                        : !storeAnswers
+                          ? 'Only marks are kept — the answer text and the chair’s notes are discarded.'
+                          : 'Answers are kept so a past run can be reread in full, with the chair’s notes.'}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={answersLocked || !storeAnswers}
+                    aria-label="Don’t save my answers"
+                    className={`toggle-switch-sm ${answersLocked || !storeAnswers ? 'active' : ''}`}
+                    disabled={answersLocked || answerSaving}
+                    onClick={onToggleAnswers}
+                  >
+                    <span className="toggle-knob-sm" />
+                  </button>
+                </div>
+              )}
               <SliderRow
                 label="Zoom"
                 value={zoom}

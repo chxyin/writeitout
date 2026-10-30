@@ -128,6 +128,20 @@ create table if not exists app_settings (
   updated_at  timestamptz not null default now()
 );
 
+-- Which addresses an account has used, so the developer view can tie a person to
+-- where they practised from. One row per (account, address); the request counter
+-- is what makes a shared school network readable as "this is the same building".
+-- This is the one place an address is kept — everything else stores a hash.
+create table if not exists user_ips (
+  user_sub   text not null,
+  ip         text not null,
+  first_seen timestamptz not null default now(),
+  last_seen  timestamptz not null default now(),
+  requests   integer not null default 1,
+  primary key (user_sub, ip)
+);
+create index if not exists user_ips_seen_idx on user_ips (last_seen desc);
+
 -- Nightly rollup the dashboard reads instead of scanning the tables above.
 create table if not exists daily_metrics (
   day                 date primary key,

@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -801,6 +801,12 @@ def auth_google(payload: GoogleCredentialRequest, request: Request) -> dict[str,
         )
     claims = verify_google_credential(payload.credential)
     logger.info("Google sign-in verified for a delegate")
+    # The one place an address is kept against a person: the developer view needs
+    # to answer "where was this delegate practising from". Everything else only
+    # ever stores a salted hash of it.
+    store = get_store()
+    store.upsert_delegate(claims)
+    store.record_ip(claims["sub"], client_identifier(request))
     # The client cannot work this out for itself: the list of admin addresses is
     # a server secret. It only decides whether the Statistics link is drawn — the
     # endpoint itself checks the token again.
@@ -830,6 +836,9 @@ def start_session(payload: SessionStartRequest, request: Request) -> dict[str, A
     # The row has to exist first: practice_sessions references delegates.
     store.upsert_delegate(user)
     session_id = store.create_session(user["sub"], payload.reps_target, payload.seconds_per_rep)
+    # Play is a fresh "they are here now" signal, so the address list stays useful
+    # even for a delegate who signed in days ago.
+    store.record_ip(user["sub"], client_identifier(request))
     return {"session_id": session_id}
 
 
@@ -1000,21 +1009,60 @@ def write_settings(payload: StorageModeRequest, request: Request) -> dict[str, A
     return {"ok": True, "poi_storage_mode": payload.mode}
 
 
+HK = timezone(timedelta(hours=8))
+
+
+def _admin_window(days: int, start: str | None, end: str | None) -> tuple[datetime, datetime]:
+    """The half-open window the dashboard reads: [start, end) in Hong Kong time.
+
+    Either a number of days back from today, or two calendar dates from the
+    picker. A range is inclusive of both its ends, so "1 Oct – 2 Oct" is two days,
+    and the order is not the caller's problem: reversed dates are swapped.
+    """
+    today = datetime.now(HK).date()
+    if start and end:
+        try:
+            first = date.fromisoformat(start)
+            last = date.fromisoformat(end)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422, detail="Dates must look like 2026-10-01."
+            ) from error
+        if last < first:
+            first, last = last, first
+        if (last - first).days > 366:
+            first = last - timedelta(days=366)
+    else:
+        last = today
+        first = last - timedelta(days=max(1, min(365, days)) - 1)
+
+    return (
+        datetime.combine(first, time.min, tzinfo=HK),
+        datetime.combine(last + timedelta(days=1), time.min, tzinfo=HK),
+    )
+
+
 @app.get("/api/admin/stats")
-def admin_stats(request: Request, days: int = 30) -> dict[str, Any]:
+def admin_stats(
+    request: Request,
+    days: int = 30,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict[str, Any]:
     """Admin only: how the deployment is being used.
 
     Everything here is aggregate — counts, averages and spend — and never an
     answer's text, so the dashboard can be read whatever the answer-storage mode
-    is. The window is in days; the store buckets by Hong Kong date, which is the
-    day a delegate experiences.
+    is. The window is either `days` back from today or an explicit `start`/`end`
+    pair, and the store buckets by Hong Kong date, which is the day a delegate
+    experiences.
     """
     require_admin(request)
     store = get_store()
-    window = max(1, min(365, days))
+    window_start, window_end = _admin_window(days, start, end)
 
     try:
-        stats = store.admin_stats(window)
+        stats = store.admin_stats(window_start, window_end)
     except Exception as error:  # noqa: BLE001 - a broken read is a 503, not a 500
         # Only the error's type is logged: a driver error can carry the DSN.
         logger.error("Admin statistics failed: %s", type(error).__name__)
@@ -1036,6 +1084,36 @@ def admin_stats(request: Request, days: int = 30) -> dict[str, Any]:
     stats["model"] = DEEPSEEK_MODEL
     stats["generated_at"] = datetime.now(timezone.utc).isoformat()
     return stats
+
+
+@app.get("/api/admin/users/{user_sub}")
+def admin_user(user_sub: str, request: Request) -> dict[str, Any]:
+    """Admin only: one delegate in full, and everything they ever submitted.
+
+    The answer and the chair's notes come back only when they were actually
+    stored — a delegate who opted out, or a deployment set to scores-only, keeps
+    its text hidden even from this view. That is the point of the switch, so the
+    page says "not stored" rather than the API quietly ignoring the rule.
+    """
+    require_admin(request)
+    store = get_store()
+    user = store.admin_user(user_sub)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Unknown delegate.")
+    user["cost_usd"] = _cost_usd(user["prompt_tokens"], user["completion_tokens"])
+    # The committee and the delegate are properties of the speech, not of the run,
+    # so they are looked up in the dataset the same way the replay page does.
+    index = speech_index()
+    reps = store.admin_user_reps(user_sub)
+    for rep in reps:
+        source = index.get(rep["drill_id"]) or {}
+        rep["committee"] = source.get("committee") or ""
+        rep["delegate"] = source.get("country") or ""
+    return {
+        "user": user,
+        "reps": reps,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # --------------------------------------------------------------------------- #

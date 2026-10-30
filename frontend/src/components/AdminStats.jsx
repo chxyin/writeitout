@@ -17,8 +17,9 @@
 import { useEffect, useState } from 'react';
 import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
+import UserDrawer from './UserDrawer.jsx';
 import useBreakpoint from '../hooks/useBreakpoint.js';
-import { fetchAdminStats, STATS_RANGES } from '../lib/stats.js';
+import { fetchAdminStats, downloadSummaryCsv, STATS_RANGES } from '../lib/stats.js';
 import { saveStorageMode } from '../lib/practice.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 import { goHome } from '../lib/route.js';
@@ -123,7 +124,13 @@ export default function AdminStats({
   animOn = true,
   lowIntensity = false
 }) {
-  const [days, setDays] = useState(30);
+  const [rangeId, setRangeId] = useState('30');
+  // The custom picker's own dates. Kept apart from the active range so typing a
+  // date does not refetch on every keystroke: the range only switches to
+  // `custom` once both ends are filled in.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [openUser, setOpenUser] = useState(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [reload, setReload] = useState(0);
   // One object for the fetch, keyed by the request it belongs to. Nothing has to
@@ -140,7 +147,7 @@ export default function AdminStats({
   const { isMobile, isTablet, orientation } = useBreakpoint();
   const tier = isMobile ? 'mobile' : isTablet ? 'tablet' : 'desktop';
 
-  const key = `${days}:${reload}`;
+  const key = `${rangeId}:${from}:${to}:${reload}`;
   const status = !session
     ? 'signed-out'
     : loaded.key === key
@@ -151,7 +158,7 @@ export default function AdminStats({
     if (!session) return undefined;
 
     let cancelled = false;
-    fetchAdminStats(days).then((result) => {
+    fetchAdminStats({ rangeId, from, to }).then((result) => {
       if (cancelled) return;
       if (result.data) {
         setLoaded({ key, status: 'ready', data: result.data, message: '' });
@@ -168,7 +175,7 @@ export default function AdminStats({
     return () => {
       cancelled = true;
     };
-  }, [days, key, session]);
+  }, [from, key, rangeId, session, to]);
 
   // The tab says what the page is, and the app's own title comes back when the
   // page closes — the same courtesy the replayed session pays.
@@ -244,25 +251,55 @@ export default function AdminStats({
               {totals && (
                 <>
                   <span className="session-meta-dot" aria-hidden="true">·</span>
-                  <span>last {data.days} days, Hong Kong time</span>
+                  <span>
+                    {data.start && data.end
+                      ? `${formatDay(data.start)} → ${formatDay(data.end)}`
+                      : `last ${data.days} days`}{' '}
+                    · Hong Kong time
+                  </span>
                 </>
               )}
             </div>
           </div>
 
           {status === 'ready' && (
-            <div className="stats-range" role="group" aria-label="Time window">
-              {STATS_RANGES.map((range) => (
-                <button
-                  key={range.days}
-                  type="button"
-                  className={`stats-range-btn ${range.days === days ? 'is-active' : ''}`.trim()}
-                  aria-pressed={range.days === days}
-                  onClick={() => setDays(range.days)}
-                >
-                  {range.label}
-                </button>
-              ))}
+            <div className="stats-range-wrap">
+              <div className="stats-range" role="group" aria-label="Time window">
+                {STATS_RANGES.map((range) => (
+                  <button
+                    key={range.id}
+                    type="button"
+                    className={`stats-range-btn ${range.id === rangeId ? 'is-active' : ''}`.trim()}
+                    aria-pressed={range.id === rangeId}
+                    onClick={() => setRangeId(range.id)}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+              {rangeId === 'custom' && (
+                <div className="stats-dates">
+                  <label className="stats-date">
+                    <span>From</span>
+                    <input
+                      type="date"
+                      value={from}
+                      max={to || undefined}
+                      onChange={(event) => setFrom(event.target.value)}
+                    />
+                  </label>
+                  <label className="stats-date">
+                    <span>To</span>
+                    <input
+                      type="date"
+                      value={to}
+                      min={from || undefined}
+                      onChange={(event) => setTo(event.target.value)}
+                    />
+                  </label>
+                  {!(from && to) && <span className="stats-dates-hint">Pick both ends</span>}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -508,15 +545,40 @@ export default function AdminStats({
 
                 <section className="stats-panel">
                   <h2 className="stats-panel-title">Runs per day</h2>
-                  <div className="stats-chart" role="img" aria-label={`Runs per day over the last ${data.days} days`}>
-                    {daily.map((day) => (
-                      <div className="stats-bar-slot" key={day.day}>
-                        <div
-                          className={`stats-bar ${day.reps === 0 ? 'is-empty' : ''}`.trim()}
-                          style={{ height: `${Math.round((day.reps / busiestDay) * 100)}%` }}
-                          title={`${formatDay(day.day)}: ${day.reps} runs · ${day.active_users} active · ${formatMoney(day.cost_usd)}`}
-                        />
-                      </div>
+                  <div className="stats-chart-frame">
+                    <div className="stats-chart-scale" aria-hidden="true">
+                      <span>{busiestDay}</span>
+                      <span>{Math.round(busiestDay / 2)}</span>
+                      <span>0</span>
+                    </div>
+                    <div
+                      className="stats-chart"
+                      role="img"
+                      aria-label={`Runs per day from ${formatDay(data.start)} to ${formatDay(data.end)}`}
+                    >
+                      {daily.map((day) => (
+                        <div className="stats-bar-slot" key={day.day} tabIndex={0}>
+                          <div
+                            className={`stats-bar ${day.reps === 0 ? 'is-empty' : ''}`.trim()}
+                            style={{ height: `${Math.round((day.reps / busiestDay) * 100)}%` }}
+                          />
+                          {/* The hover card is the same information the bar's own
+                              `title` carries, but readable: a native tooltip can
+                              take a second to appear and cannot be styled. */}
+                          <span className="stats-tip" role="tooltip">
+                            <b>{formatDay(day.day)}</b>
+                            <span>{formatCount(day.reps)} {day.reps === 1 ? 'run' : 'runs'}</span>
+                            <span>{formatCount(day.active_users)} active · {formatMoney(day.cost_usd)}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="stats-chart-axis" aria-hidden="true">
+                    {daily.map((day, index) => (
+                      <span key={day.day}>
+                        {index % Math.max(1, Math.ceil(daily.length / 7)) === 0 ? formatDay(day.day) : ''}
+                      </span>
                     ))}
                   </div>
                   <p className="stats-chart-caption">
@@ -763,7 +825,17 @@ export default function AdminStats({
                 </div>
 
                 <section className="stats-panel">
-                  <h2 className="stats-panel-title">Busiest delegates</h2>
+                  <div className="stats-panel-head">
+                    <h2 className="stats-panel-title">Busiest delegates</h2>
+                    <button
+                      type="button"
+                      className="stats-choice-btn is-inline"
+                      onClick={() => downloadSummaryCsv(delegates, new Date().toISOString().slice(0, 10))}
+                      disabled={delegates.length === 0}
+                    >
+                      Download CSV
+                    </button>
+                  </div>
                   {delegates.length === 0 ? (
                     <p className="stats-empty">No accounts yet.</p>
                   ) : (
@@ -775,7 +847,14 @@ export default function AdminStats({
                         <span className="stats-num">Best</span>
                       </div>
                       {delegates.map((row) => (
-                        <div className="stats-table-row" key={row.email || row.name || row.reps}>
+                        <button
+                          type="button"
+                          className="stats-table-row is-clickable"
+                          key={row.sub || row.email || row.name || row.reps}
+                          onClick={() => setOpenUser(row.sub || null)}
+                          disabled={!row.sub}
+                          title={row.sub ? 'Open this delegate' : 'No account id on this row'}
+                        >
                           <span className="stats-delegate">
                             <span className="stats-delegate-name">{row.name || 'Delegate'}</span>
                             {row.email && <span className="stats-delegate-email">{row.email}</span>}
@@ -783,7 +862,7 @@ export default function AdminStats({
                           <span className="stats-num">{formatCount(row.reps)}</span>
                           <span className="stats-num">{formatAverage(row.average_score)}</span>
                           <span className="stats-num">{formatAverage(row.best_score)}</span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -828,6 +907,8 @@ export default function AdminStats({
           </>
         )}
       </div>
+
+      {openUser && <UserDrawer sub={openUser} onClose={() => setOpenUser(null)} />}
     </div>
   );
 }

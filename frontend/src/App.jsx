@@ -28,6 +28,9 @@ import {
   rateSession,
   recordRep,
   repId,
+  saveAnswerPreference,
+  fetchProfile,
+  fetchDeploymentSettings,
   sendActivity
 } from './lib/practice.js';
 import Splash from './components/Splash.jsx';
@@ -208,6 +211,43 @@ export default function App() {
   // it as well: the request headers carry the credential and the history bucket
   // is keyed by the account id.
   const { session, signIn, signOut } = useAuthSession();
+
+  // Answer storage: the delegate's own switch (shown in Settings), and the
+  // deployment's policy, which outranks it. Both are read once per sign-in; the
+  // server enforces them on every write either way, so these values only decide
+  // what the switch looks like.
+  const [storeAnswers, setStoreAnswers] = useState(true);
+  const [deploymentMode, setDeploymentMode] = useState(null);
+  const [answersSaving, setAnswersSaving] = useState(false);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    let cancelled = false;
+    fetchProfile().then((profile) => {
+      if (cancelled || !profile) return;
+      if (typeof profile.store_answers === 'boolean') setStoreAnswers(profile.store_answers);
+    });
+    fetchDeploymentSettings().then((settings) => {
+      if (!cancelled && settings) setDeploymentMode(settings.poi_storage_mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const answersLocked = deploymentMode !== null && deploymentMode !== 'full';
+
+  const handleToggleAnswers = async () => {
+    if (answersLocked || answersSaving) return;
+    const next = !storeAnswers;
+    setStoreAnswers(next);
+    setAnswersSaving(true);
+    const saved = await saveAnswerPreference(next);
+    setAnswersSaving(false);
+    // A refusal puts the switch back, so the menu never claims a setting the
+    // server did not accept.
+    if (!saved) setStoreAnswers(!next);
+  };
 
   // The address bar is the router: the start screen is the root, a past session
   // is #/session/<id>. Re-read on every hash change, so the back button and a
@@ -953,52 +993,67 @@ export default function App() {
     );
   }
 
+  // The gear belongs to the app, not to the drill: settings are worth reaching
+  // from the start screen too — the answer-storage opt-out lives in here, and a
+  // privacy switch nobody can find before playing is not a switch.
+  const settingsMenu = (
+    <SettingsMenu
+      open={showMenu}
+      onToggle={() => setShowMenu(!showMenu)}
+      onClose={closeMenu}
+      animOn={animOn}
+      onAnimToggle={() => updateSetting('animOn', !animOn)}
+      showTopic={showTopic}
+      onShowTopicToggle={() => updateSetting('showTopic', !showTopic)}
+      showComm={showComm}
+      onShowCommToggle={() => updateSetting('showComm', !showComm)}
+      lowIntensity={lowIntensity}
+      onLowIntensityToggle={() => updateSetting('lowIntensity', !lowIntensity)}
+      theme={theme}
+      onThemeChange={(value) => updateSetting('theme', value)}
+      background={background}
+      onBackgroundChange={(value) => updateSetting('background', value)}
+      zoom={zoom}
+      onZoomChange={(value) => updateSetting('zoom', value)}
+      topOffset={topOffset}
+      onTopOffsetChange={(value) => updateSetting('topOffset', value)}
+      bottomOffset={bottomOffset}
+      onBottomOffsetChange={(value) => updateSetting('bottomOffset', value)}
+      textSize={textSize}
+      onTextSizeChange={(value) => updateSetting('textSize', value)}
+      cardWidth={cardWidth}
+      onCardWidthChange={(value) => updateSetting('cardWidth', value)}
+      showAnswerToggle={Boolean(session)}
+      storeAnswers={storeAnswers}
+      answersLocked={answersLocked}
+      answerSaving={answersSaving}
+      onToggleAnswers={handleToggleAnswers}
+      onResetDefaults={resetSettings}
+      settingsAreDefault={settingsAreDefault}
+    />
+  );
+
   if (currentView === 'splash') {
     return (
-      <Splash
-        animOn={animOn}
-        lowIntensity={lowIntensity}
-        session={session}
-        onSignIn={handleSignIn}
-        onSignOut={signOut}
-        initialSettings={gameSettings}
-        historyVersion={historyVersion}
-        onStart={handleStart}
-      />
+      <>
+        <Splash
+          animOn={animOn}
+          lowIntensity={lowIntensity}
+          session={session}
+          onSignIn={handleSignIn}
+          onSignOut={signOut}
+          initialSettings={gameSettings}
+          historyVersion={historyVersion}
+          onStart={handleStart}
+        />
+        {settingsMenu}
+      </>
     );
   }
 
   return (
     <>
-      <SettingsMenu
-        open={showMenu}
-        onToggle={() => setShowMenu(!showMenu)}
-        onClose={closeMenu}
-        animOn={animOn}
-        onAnimToggle={() => updateSetting('animOn', !animOn)}
-        showTopic={showTopic}
-        onShowTopicToggle={() => updateSetting('showTopic', !showTopic)}
-        showComm={showComm}
-        onShowCommToggle={() => updateSetting('showComm', !showComm)}
-        lowIntensity={lowIntensity}
-        onLowIntensityToggle={() => updateSetting('lowIntensity', !lowIntensity)}
-        theme={theme}
-        onThemeChange={(value) => updateSetting('theme', value)}
-        background={background}
-        onBackgroundChange={(value) => updateSetting('background', value)}
-        zoom={zoom}
-        onZoomChange={(value) => updateSetting('zoom', value)}
-        topOffset={topOffset}
-        onTopOffsetChange={(value) => updateSetting('topOffset', value)}
-        bottomOffset={bottomOffset}
-        onBottomOffsetChange={(value) => updateSetting('bottomOffset', value)}
-        textSize={textSize}
-        onTextSizeChange={(value) => updateSetting('textSize', value)}
-        cardWidth={cardWidth}
-        onCardWidthChange={(value) => updateSetting('cardWidth', value)}
-        onResetDefaults={resetSettings}
-        settingsAreDefault={settingsAreDefault}
-      />
+      {settingsMenu}
 
       <PaperBackground animOn={animOn} lowIntensity={lowIntensity} />
 

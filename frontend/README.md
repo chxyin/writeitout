@@ -96,9 +96,37 @@ redeploy:
   `app_settings` through `PATCH /api/admin/settings`. Only `full` stores text, so
   the page offers two choices rather than the API's three modes; the switch
   applies to new runs and never deletes what is already stored.
-- **Save my answers** (delegate, on the start screen's profile card) — the
-  account's own opt-out, `PATCH /api/profile`. The server enforces both, on every
-  write; the browser only decides what the switch shows.
+- **Don't save my answers** (delegate, in **Settings → General**) — the account's
+  own opt-out, `PATCH /api/profile`, worded as the thing you would want to turn
+  on. The gear is now drawn on the start screen too, because a privacy switch
+  nobody can find before playing is not a switch. The server enforces both, on
+  every write; the browser only decides what the toggle shows.
+
+### Windows, the chart, and one delegate in detail
+
+The picker offers Today, 7 days, 30 days, 90 days, **1 year** and **Custom**
+(two calendar dates, inclusive of both ends). The window is `start`/`end` in Hong
+Kong time, half-open on the server, so "1 Oct – 2 Oct" is exactly two days.
+
+The runs-per-day chart carries a y scale and a date axis, and hovering (or
+tabbing to) a bar shows that day in full: runs, delegates active, and spend.
+
+Clicking a row in **Busiest delegates** opens a drawer for that account
+(`GET /api/admin/users/{sub}`): name, email, the Google `sub`, join date, last
+active, total runs, average score, time on app, tokens and estimated spend,
+followed by the addresses that account has used (`user_ips`, one row per
+address with a request count) and **God Mode** — every run they ever submitted,
+newest first, each expandable to show the speech, their answer, the chair's
+grade, reasoning and notes, the writing time and the grading time, and the
+tokens that run cost. Long lists filter by topic, committee or grade, and
+**Download CSV** exports every run. The dashboard's own table exports as a
+summary CSV (name, email, runs, average, best, streak, last seen).
+
+Answer text still obeys the storage policy: a delegate who opted out, or a
+deployment set to scores-only, shows "not stored" in God Mode as well. That is
+what the switch is for — an admin page that could read it back would make the
+promise meaningless.
+
 
 Writing time is recorded per run (`reps.write_ms`): the browser stamps when the
 speech appeared and sends the difference at submit, so `Clock used` is measurable
@@ -110,6 +138,14 @@ The completion card also asks one question — "Was this useful?" with **Yes** a
 /api/sessions/{id}/rating`). "Would repeat" on the dashboard is the share of
 *answered* sittings marked useful; a delegate who closes the card without tapping
 counts as neither, because no answer is not a no.
+
+## Privacy
+
+The one place a raw address is kept is `user_ips`, written when a delegate signs
+in and when they press Play: one row per (account, address) with a request count
+and first/last seen, never per run. Everything else stores only a salted hash
+(`events.ip_hash`). It exists so the developer view can tie an account to the
+network it practised from, and the list is served only by the admin endpoint.
 
 ## Scripts
 
@@ -146,3 +182,4 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
