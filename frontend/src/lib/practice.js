@@ -257,6 +257,22 @@ export async function importLocalHistory(entries) {
   }
 }
 
+/**
+ * The completion card's one tap: 1 = useful, 0 = not yet. Sent with the session
+ * id captured before the session closed, because closing clears the recorder's
+ * own. Failure is silent — a lost tap is not worth showing the delegate an error
+ * on the screen that ends their practice.
+ */
+export async function rateSession(id, rating) {
+  if (!id) return false;
+  try {
+    await api.post(`/api/sessions/${id}/rating`, { rating }, { timeoutMs: 6000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The delegate's answer-storage preference. */
 export async function saveAnswerPreference(storeAnswers) {
   try {
@@ -264,6 +280,20 @@ export async function saveAnswerPreference(storeAnswers) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The deployment-wide switches the start screen needs to know about. Only the
+ * answer-storage mode for now: a delegate's own switch is a request, and the
+ * deployment can overrule it, so the card has to be able to say so.
+ */
+export async function fetchDeploymentSettings() {
+  try {
+    const data = await api.get('/api/settings');
+    return data && typeof data.poi_storage_mode === 'string' ? data : null;
+  } catch {
+    return null;
   }
 }
 

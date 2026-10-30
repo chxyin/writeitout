@@ -2030,6 +2030,42 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
 }
 .switch:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 999px; }
 
+/* The completion card's one-tap question. It sits under the score rather than in
+   the action row, so "Yes / Not yet" can never be mistaken for Exit or Start. */
+.session-rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+.session-rating-question {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.62);
+}
+.session-rating-options { display: flex; gap: 0.4rem; }
+.session-rating-btn {
+  min-height: 34px;
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.session-rating-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.session-rating-btn.is-quiet { color: rgba(255, 255, 255, 0.68); font-weight: 700; }
+.session-rating-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.session-rating-thanks {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.62);
+}
+
 .stats-shell { max-width: 1100px; }
 .stats-top { align-items: flex-start; }
 

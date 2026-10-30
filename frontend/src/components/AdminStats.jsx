@@ -412,6 +412,14 @@ export default function AdminStats({
                     </span>
                   </div>
                   <div>
+                    <strong>Would repeat</strong>
+                    <span>
+                      Of the sittings that got the one-tap question at the end, the share marked
+                      useful. Only answered sittings count, so leaving without tapping is not a
+                      "no".
+                    </span>
+                  </div>
+                  <div>
                     <strong>Gone quiet</strong>
                     <span>
                       Delegates counted from their last graded run. "Never practised" is a
@@ -628,6 +636,15 @@ export default function AdminStats({
                           habits.clock_measured
                             ? `median of ${formatCount(habits.clock_measured)} timed runs`
                             : 'no timed run measured yet'
+                        }
+                      />
+                      <Fact
+                        label="Would repeat"
+                        value={formatPercent(habits.useful_share)}
+                        detail={
+                          habits.rated
+                            ? `${formatCount(habits.useful)} of ${formatCount(habits.rated)} rated useful`
+                            : 'no sitting rated yet'
                         }
                       />
                       <Fact

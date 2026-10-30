@@ -112,6 +112,11 @@ class Store:
     ) -> None:
         raise NotImplementedError
 
+    def set_session_rating(self, sub: str, session_id: str, rating: int) -> bool:
+        """The completion card's tap. False when the session is not this account's
+        (or no longer exists), so the caller can answer 404."""
+        raise NotImplementedError
+
     def add_rep(
         self,
         sub: str,
@@ -291,6 +296,14 @@ class MemoryStore(Store):
             session["completed"] = completed
             session["topic"] = topic or session["topic"]
             session["ended_at"] = datetime.now(HK)
+
+    def set_session_rating(self, sub: str, session_id: str, rating: int) -> bool:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None or session["user_sub"] != sub:
+                return False
+            session["rating"] = int(rating)
+            return True
 
     def add_rep(
         self,
@@ -685,6 +698,12 @@ class MemoryStore(Store):
                         if int(s.get("reps_done") or 0) <= 1 and not s.get("completed")
                     ]
                 ),
+                "rated": len([s for s in recent_sessions if s.get("rating") is not None]),
+                "useful": len([s for s in recent_sessions if s.get("rating") == 1]),
+                "useful_share": rate(
+                    len([s for s in recent_sessions if s.get("rating") == 1]),
+                    len([s for s in recent_sessions if s.get("rating") is not None]),
+                ),
                 "finish_rate": rate(
                     len([s for s in recent_sessions if s.get("completed")]),
                     len(recent_sessions),
@@ -900,6 +919,18 @@ class PostgresStore(Store):
                 """,
                 (reps_done, avg_score, completed, topic, session_id, sub),
             )
+
+    def set_session_rating(self, sub: str, session_id: str, rating: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                update practice_sessions set rating = %s
+                where id = %s and user_sub = %s
+                returning id
+                """,
+                (int(rating), session_id, sub),
+            ).fetchone()
+        return row is not None
 
     def add_rep(
         self,
@@ -1349,6 +1380,8 @@ class PostgresStore(Store):
                     count(*) filter (where completed) as finished,
                     count(*) filter (where seconds_per_rep > 0) as timed,
                     count(*) filter (where reps_done <= 1 and not completed) as one_and_done,
+                    count(*) filter (where rating is not null) as rated,
+                    count(*) filter (where rating = 1) as useful,
                     avg(case when ended_at is not null then
                         least(greatest(extract(epoch from (ended_at - started_at)), 0), 14400)
                     end) as avg_seconds,
@@ -1513,6 +1546,11 @@ class PostgresStore(Store):
                 "finished": whole(habits["finished"]),
                 "timed": whole(habits["timed"]),
                 "one_and_done": whole(habits["one_and_done"]),
+                # The completion card's tap, which is the only direct signal that
+                # the chair's feedback helped rather than merely got a number.
+                "rated": whole(habits["rated"]),
+                "useful": whole(habits["useful"]),
+                "useful_share": share(habits["useful"], habits["rated"]),
                 "finish_rate": share(habits["finished"], habits["sessions"]),
                 "timed_share": share(habits["timed"], habits["sessions"]),
                 "avg_session_seconds": seconds(habits["avg_seconds"]),

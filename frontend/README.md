@@ -105,6 +105,12 @@ speech appeared and sends the difference at submit, so `Clock used` is measurabl
 without guessing from timestamps. It is a different number from `latency_ms`,
 which is how long the grader took.
 
+The completion card also asks one question — "Was this useful?" with **Yes** and
+**Not yet** — written to `practice_sessions.rating` (`POST
+/api/sessions/{id}/rating`). "Would repeat" on the dashboard is the share of
+*answered* sittings marked useful; a delegate who closes the card without tapping
+counts as neither, because no answer is not a no.
+
 ## Scripts
 
 ```bash

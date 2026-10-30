@@ -3,7 +3,7 @@ import { googleLogout } from '@react-oauth/google';
 import PaperBackground from './PaperBackground.jsx';
 import GoogleSignInButton from './GoogleSignInButton.jsx';
 import { loadSessionHistory } from '../lib/sessionHistory.js';
-import { fetchHistory, fetchProfile, saveAnswerPreference } from '../lib/practice.js';
+import { fetchHistory, fetchProfile, fetchDeploymentSettings, saveAnswerPreference } from '../lib/practice.js';
 import { sessionHash, ADMIN_HASH } from '../lib/route.js';
 import { GOOGLE_CLIENT_ID } from '../lib/googleAuth.js';
 // The wordmark is inlined as markup rather than dropped into an <img>: an SVG
@@ -171,6 +171,21 @@ export default function Splash({
   // the profile says once that answers — an account that opted out stays out.
   const [storeAnswers, setStoreAnswers] = useState(true);
   const [savingAnswers, setSavingAnswers] = useState(false);
+  // The deployment's own mode. It outranks the delegate's switch, so when it is
+  // not `full` the card says so and the switch stops pretending it decides.
+  // Null until the answer arrives, which is treated as "no override".
+  const [deploymentMode, setDeploymentMode] = useState(null);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    let cancelled = false;
+    fetchDeploymentSettings().then((settings) => {
+      if (!cancelled && settings) setDeploymentMode(settings.poi_storage_mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   useEffect(() => {
     if (!session) return undefined;
@@ -280,6 +295,12 @@ export default function Splash({
   // known, and the mock's "D" when there is no profile at all.
   const avatarLetter = (user?.name || 'D').trim().charAt(0).toUpperCase() || 'D';
 
+  // The deployment's storage mode outranks the delegate's own switch, so the
+  // card shows the effective answer: locked Off when the deployment keeps scores
+  // only, otherwise whatever the delegate chose.
+  const answersLocked = deploymentMode !== null && deploymentMode !== 'full';
+  const answersOn = !answersLocked && storeAnswers;
+
   return (
     // is-logged-in / is-logged-out is what lets the mobile block stack the cards
     // in the right order: logo → settings → profile, or logo → sign-in → settings.
@@ -326,29 +347,33 @@ export default function Splash({
               {/* The delegate's own copy of the answer-storage policy. It sits in
                   the profile card because it is about them, not about a session:
                   the server enforces it on every write, so turning it off now also
-                  decides what a replay from next week will be able to show. */}
+                  decides what a replay from next week will be able to show. When
+                  the deployment is set to scores-only the switch is shown as Off
+                  and locked, because it can no longer change the outcome. */}
               <div className="profile-pref">
                 <div className="profile-pref-text">
                   <span className="profile-pref-label">Save my answers</span>
                   <span className="profile-pref-hint">
-                    {storeAnswers
-                      ? 'Kept so a past run can be reread in full, with the chair’s notes.'
-                      : 'Only marks are kept. The answer text and the chair’s notes are discarded.'}
+                    {answersLocked
+                      ? 'This deployment keeps scores only, so no answer text is stored.'
+                      : storeAnswers
+                        ? 'Kept so a past run can be reread in full, with the chair’s notes.'
+                        : 'Only marks are kept. The answer text and the chair’s notes are discarded.'}
                   </span>
                 </div>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={storeAnswers}
+                  aria-checked={answersOn}
                   aria-label="Save my answers"
-                  className={`switch ${storeAnswers ? 'is-on' : ''}`.trim()}
-                  disabled={savingAnswers}
+                  className={`switch ${answersOn ? 'is-on' : ''}`.trim()}
+                  disabled={savingAnswers || answersLocked}
                   onClick={toggleStoreAnswers}
                 >
                   <span className="switch-track" aria-hidden="true">
                     <span className="switch-knob" />
                   </span>
-                  <span className="switch-state">{storeAnswers ? 'On' : 'Off'}</span>
+                  <span className="switch-state">{answersOn ? 'On' : 'Off'}</span>
                 </button>
               </div>
               {/* Only the deployment's admin sees this. The flag comes back from

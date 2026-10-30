@@ -25,6 +25,7 @@ import {
   endPracticeSession,
   flushSessionOnHide,
   importLocalHistory,
+  rateSession,
   recordRep,
   repId,
   sendActivity
@@ -178,6 +179,10 @@ export default function App() {
   const [drillError, setDrillError] = useState('');
   const [sessionComplete, setSessionComplete] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' or 'full'
+  // The completion card's one tap. `completedSessionId` is captured when the
+  // session closes, because the recorder forgets the id as soon as it does.
+  const [sessionRating, setSessionRating] = useState(null);
+  const [completedSessionId, setCompletedSessionId] = useState(null);
   const [poi, setPoi] = useState('');
   const [loading, setLoading] = useState(false);
   const [formExiting, setFormExiting] = useState(false);
@@ -739,8 +744,7 @@ export default function App() {
    * rather than by an arbitrary first one.
    */
   const completeSession = () => {
-    const graded = history.filter((entry) => entry.feedback);
-    const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
+    const graded = history.filter((entry) => entry.feedback);    const total = graded.reduce((sum, entry) => sum + entry.feedback.score, 0);
     const average = graded.length ? Math.round((total / graded.length) * 10) / 10 : null;
     const topics = [...new Set(graded.map((entry) => entry.drill.topic))];
     const label = topics.length === 0
@@ -752,6 +756,8 @@ export default function App() {
     // One write path for both stores: the local bucket is the instant/offline
     // view, the API row is the durable one.
     if (graded.length) saveSessionResult({ topic: label, score: average }, session?.sub);
+    setCompletedSessionId(currentSessionId());
+    setSessionRating(null);
     endPracticeSession({
       repsDone: graded.length,
       avgScore: average,
@@ -764,6 +770,14 @@ export default function App() {
 
   // Next > : walk forward through saved reps, and only fetch a new drill once the
   // user is standing on the last one (Dr. Frost's "end of the timeline").
+  // The completion card's tap. Shown once, then replaced by a line of thanks; a
+  // failed send still thanks the delegate, because the tap is a courtesy, not a
+  // form they have to complete.
+  const handleRateSession = (value) => {
+    setSessionRating(value);
+    if (completedSessionId) rateSession(completedSessionId, value);
+  };
+
   const handleNext = () => {
     if (currentIndex < history.length - 1) {
       goToEntry(currentIndex + 1);
@@ -856,6 +870,10 @@ export default function App() {
     setPoi('');
     setShowFeedback(false);
     setSessionComplete(false);
+    // Leaving drops the card's tap target with it: a later session must never be
+    // rated with an id from an earlier one.
+    setCompletedSessionId(null);
+    setSessionRating(null);
     setFormExiting(false);
     setSubmitError('');
     setDrillError('');
@@ -1070,6 +1088,8 @@ export default function App() {
             completed={gradedCount}
             average={sessionAverage}
             topic={sessionLabel}
+            onRate={handleRateSession}
+            rating={sessionRating}
           />
         ) : !showFeedback || !feedback ? (
           <DrillForm

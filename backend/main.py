@@ -476,6 +476,12 @@ class ActivityRequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=64)
 
 
+class RatingRequest(BaseModel):
+    """The completion card's one tap. 1 = useful, 0 = not yet."""
+
+    rating: int = Field(ge=0, le=1)
+
+
 class EventItem(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     props: dict[str, Any] = Field(default_factory=dict)
@@ -927,6 +933,18 @@ def update_profile(payload: StorageModeRequest, request: Request) -> dict[str, A
     store.upsert_delegate(user)
     store.set_store_answers(user["sub"], payload.mode == "full")
     return {"ok": True, "store_answers": payload.mode == "full"}
+
+
+@app.post("/api/sessions/{session_id}/rating")
+def rate_session(session_id: str, payload: RatingRequest, request: Request) -> dict[str, Any]:
+    """The completion card's one tap. A session that is not this account's is a
+    404 like every other session read, and a second tap overwrites the first —
+    changing your mind about whether a session helped is not an error."""
+    user = require_user(request)
+    updated = get_store().set_session_rating(user["sub"], _session_id(session_id), payload.rating)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Unknown practice session.")
+    return {"ok": True}
 
 
 @app.post("/api/activity")

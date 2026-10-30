@@ -42,12 +42,16 @@ create table if not exists practice_sessions (
   completed       boolean not null default false,
   -- The topic(s) the session covered, written when it is closed out. It lives on
   -- the session so the history list is one row per session, not a join over reps.
-  topic           text
+  topic           text,
+  -- The one-tap verdict from the completion card: 1 useful, 0 not yet. Null means
+  -- the delegate left without answering, which is not the same as "no".
+  rating          smallint
 );
 
 -- Databases created before `topic` existed need it added: `create table if not
 -- exists` is a no-op on an existing table, so this is the migration.
 alter table practice_sessions add column if not exists topic text;
+alter table practice_sessions add column if not exists rating smallint;
 
 -- One graded POI. The id comes from the client so a retried request cannot
 -- double-count a rep.
