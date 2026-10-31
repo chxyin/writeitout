@@ -74,9 +74,9 @@ Every screen sits under a warm **darkening lens**, on by default — a fixed pan
 colour and opacity are both derived from one number: a colour temperature.
 
 **Settings → General → Night light** is a switch plus a dial from **1000K to
-6000K** (default 3400K, a warm bulb). 6000K is daylight, so the lens does
-nothing and the pane is not drawn at all. 3000K is a lamp; 1000K is candlelight.
-Warmer always means dimmer, because the one dial feeds both numbers:
+6000K** (default 5000K, a hair warmer than daylight). 6000K is daylight, so the
+lens does nothing and the pane is not drawn at all. 3000K is a lamp; 1000K is
+candlelight. Warmer always means dimmer, because the one dial feeds both numbers:
 
 - **tint** is the blackbody colour for that temperature (`kelvinToRgb` in
   `src/lib/appearance.js`, Tanner Helland's approximation) — the colour a real
@@ -97,9 +97,13 @@ snatch the slider out from under the cursor mid-drag.
 
 The preference is per browser, in the same localStorage entry as the other
 settings (`nightKelvin`, plus `nightLastWarm` for the switch's memory), and
-nothing about it reaches the server. A save from the old two-dial version
-(`nightLight` + `nightLightStrength`) is migrated on load: 55% becomes 3300K and
-an old "off" becomes 6000K.
+nothing about it reaches the server. Saves are versioned (`SETTINGS_VERSION` in
+`App.jsx`): a save from the old two-dial version (`nightLight` +
+`nightLightStrength`) is migrated on load — 55% becomes 3300K, an old "off"
+becomes 6000K — and a save from before v1.7 that is still on the old 3400K default
+follows the new 5000K one, while a temperature that was actually chosen stays put.
+The conversion uses the published Helland curve; the blue term was mistyped for a
+version, which made every temperature more orange than the physics says.
 
 Two details worth keeping:
 
@@ -369,6 +373,49 @@ Formatting tab, because "it looks wrong on my screen" is the complaint a delegat
 can fix themselves. The rotation is state, the fade is a CSS animation keyed on the
 line, and the last tip is that the tips can be turned off — **Settings → General →
 Show hints**.
+
+The strip is text: no pill, no border, no backdrop-filter. A caption with a box
+around it reads as a control, and this is the one thing on the screen that is not
+one; a text-shadow keeps it legible over the grid instead.
+
+## Formatting
+
+**Settings → Formatting** holds four numbers — top offset, bottom offset, speech
+text size, speech card width — written onto `<body>` as `--fmt-*` custom
+properties (`src/lib/formatting.js`) and read by `index.css`.
+
+- **Desktop** reads all four directly: the shell is the card plus two gutters, and
+  the offsets are the shell's own margins.
+- **Phones and tablets** have no card column to narrow, so the values are mapped
+  onto the numbers that layout does have — top/bottom offset become the space
+  above and below the drill, and card width becomes the side gutters, inverted
+  (dragging right widens the card to edge-to-edge, dragging left narrows it). Each
+  expression keeps the shipped look at its default, which is why the phone block
+  reads "the old fixed value + (slider − default)".
+- The tab draws a **preview** of the drill on the app's own background, driven by
+  the same four values. Without it a change is invisible while the panel is open —
+  the panel covers the card, and on a phone the card is the whole screen.
+- **Reset is per tab**: one button for General, one for Formatting, each disabled
+  while its own half already sits at the defaults.
+
+## Mobile
+
+The mobile tier is a fixed-height shell that follows the visible viewport
+(`src/hooks/useViewportHeight.js` writes `--app-viewport-height`), so the POI field
+and Submit stay above the on-screen keyboard. Three consequences are handled there:
+
+- **The keyboard must not squeeze the speech away.** At a ~400px visual viewport
+  the progress band and the composer used to consume everything, leaving a
+  zero-height card. With `:root[data-keyboard="on"]` the shell collapses its
+  gutters, hides the mode switch, holds a readable card and scrolls if it still
+  does not fit.
+- **Coming back must land at the top.** iOS scrolls the page to reveal a focused
+  field and does not undo it. Losing focus, closing the keyboard, returning to the
+  tab, rotating and submitting all call the same idempotent reset.
+- **iOS focus zoom** is a browser behaviour, not a layout bug: Safari magnifies the
+  page when a focused field computes to less than 16px and does not zoom out
+  again. The fix is the threshold, not `user-scalable=no`: form fields on phones
+  are pinned to a rendered 16px (`max(16px, calc(16px / var(--ui-scale)))`).
 
 ## The rep timer, including Chrono
 

@@ -1,5 +1,41 @@
 # Versions
 
+## Version 1.7 - A Phone That Behaves, and a Quieter Lamp
+
+- **Night light defaults to 5000K.** The faintest setting the dial can hold that
+  still does something; a save from before this version that was still sitting on
+  the old 3400K default follows it, and a temperature that was actually chosen is
+  left alone. The blackbody conversion also had a wrong blue coefficient, which
+  made every temperature more orange than the curve says: it is the published
+  curve now, so 5000K is a whisper of warmth and 2000K is a bulb, not amber.
+- **The hints are text, not a pill.** No background, no border, no blur — just the
+  sentence, with a shadow so it stays legible over the grid.
+- **Formatting works on a phone.** The four sliders used to shape the desktop
+  shell only, so on a phone three of them moved nothing. They are now mapped onto
+  the numbers the phone layout has: top and bottom offset are the space above and
+  below the drill, card width is the side margins (right widens the card, left
+  narrows it), text size as before.
+- **A preview in the Formatting tab.** A thumbnail of the drill on the app's own
+  background, driven by the same four values, so a change is visible while the
+  panel is open — the panel covers the card, and on a phone the card is the whole
+  screen.
+- **Reset is per tab.** *Reset general settings* and *Reset formatting settings*
+  each put back only their own half, and each greys out on its own.
+- **The keyboard no longer eats the drill.** Following the visual viewport is what
+  keeps Submit above the keyboard, but at a ~400px viewport the bands squeezed the
+  speech card to nothing, and a phone that had been scrolled once stayed scrolled.
+  With the keyboard open the shell collapses its gutters, steps the mode switch
+  aside, holds a readable card and scrolls if it must; losing focus, closing the
+  keyboard, returning to the tab, rotating and submitting all return the layout to
+  the top.
+- **iOS focus zoom.** Form fields are pinned to a rendered 16px on phones (divided
+  by the zoom factor), which is the threshold Safari uses before it magnifies the
+  page on focus and never zooms back out.
+- **Mobile layout, tuned.** The speech card is always the full column width
+  whatever the tier, the card gives some side padding back to the text on a phone,
+  and the Runs/Timer picker takes the card's full width so its five Timer options
+  stop wrapping — "Custom" was landing on a line of its own at 390px.
+
 ## Version 1.6 - Kelvin Night Light, the Traffic Log and the Stopwatch
 
 - **Night light, rebuilt on the Kelvin scale.** One dial instead of two: 6000K is

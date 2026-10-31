@@ -129,7 +129,39 @@ function persistLastSession(settings) {
   }
 }
 
+/**
+ * The preferences this version writes, and the ones this version's reset buttons
+ * put back. They are the two halves of the Settings panel — General (the look of
+ * the page) and Formatting (the four layout sliders) — so "Reset to defaults"
+ * can mean the tab you are looking at rather than the whole panel.
+ */
+const GENERAL_SETTING_KEYS = [
+  'animOn',
+  'showTopic',
+  'showComm',
+  'lowIntensity',
+  'nightKelvin',
+  'nightLastWarm',
+  'hints',
+  'theme',
+  'background',
+  'zoom'
+];
+const FORMATTING_SETTING_KEYS = ['topOffset', 'bottomOffset', 'textSize', 'cardWidth'];
+
+/**
+ * Bumped when a default changes in a way existing saves should follow. A save
+ * carries the version it was written by, so the migration below only ever runs
+ * once per browser: a delegate who deliberately picked the old 3400K keeps it.
+ */
+const SETTINGS_VERSION = 2;
+
+/** The temperature the app shipped with before SETTINGS_VERSION 2. */
+const LEGACY_DEFAULT_KELVIN = 3400;
+
 const DEFAULT_SETTINGS = {
+  // Written into every save so loadSettings can tell a fresh entry from an old one.
+  version: SETTINGS_VERSION,
   animOn: true,
   showTopic: true,
   showComm: true,
@@ -177,8 +209,14 @@ function loadSettings() {
     parsed.nightKelvin ??
     (parsed.nightLight === false ? NIGHT_OFF_KELVIN : kelvinFromStrength(parsed.nightLightStrength)) ??
     DEFAULT_SETTINGS.nightKelvin;
-  const nightKelvin = clampValue(savedKelvin, NIGHT_KELVIN_RANGE);
+  // A save from before the 5000K default that still sits on the old 3400K default
+  // never moved the dial, so it follows the new one. Any other temperature is a
+  // choice and is left alone.
+  const kelvinSource =
+    !parsed.version && savedKelvin === LEGACY_DEFAULT_KELVIN ? NIGHT_KELVIN_RANGE.default : savedKelvin;
+  const nightKelvin = clampValue(kelvinSource, NIGHT_KELVIN_RANGE);
   return {
+    version: SETTINGS_VERSION,
     animOn: Boolean(parsed.animOn ?? DEFAULT_SETTINGS.animOn),
     showTopic: Boolean(parsed.showTopic ?? DEFAULT_SETTINGS.showTopic),
     showComm: Boolean(parsed.showComm ?? DEFAULT_SETTINGS.showComm),
@@ -451,14 +489,26 @@ export default function App() {
     }));
   }, []);
 
-  // Settings → panel footer. A copy of the constant rather than the constant
-  // itself, so the state object never aliases the module-level default.
-  const resetSettings = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), []);
-  // Key by key, so the reset button greys out once there is nothing left to put
-  // back — the same "disabled at the default" rule the slider readouts follow.
-  const settingsAreDefault = Object.entries(DEFAULT_SETTINGS).every(
-    ([key, value]) => settings[key] === value
-  );
+  // Settings → panel footer. One button per tab: General puts back the look of the
+  // page, Formatting puts back the four layout sliders, and neither touches the
+  // other. A copy of the constant rather than the constant itself, so the state
+  // object never aliases the module-level default.
+  const resetSettingsGroup = useCallback((keys) => {
+    setSettings((previous) => {
+      const next = { ...previous };
+      keys.forEach((key) => {
+        next[key] = DEFAULT_SETTINGS[key];
+      });
+      return next;
+    });
+  }, []);
+  const resetGeneral = useCallback(() => resetSettingsGroup(GENERAL_SETTING_KEYS), [resetSettingsGroup]);
+  const resetFormatting = useCallback(() => resetSettingsGroup(FORMATTING_SETTING_KEYS), [resetSettingsGroup]);
+  // Key by key, so each reset button greys out once its own half is back at the
+  // defaults — the same "disabled at the default" rule the slider readouts follow.
+  const groupIsDefault = (keys) => keys.every((key) => settings[key] === DEFAULT_SETTINGS[key]);
+  const generalAreDefault = groupIsDefault(GENERAL_SETTING_KEYS);
+  const formattingAreDefault = groupIsDefault(FORMATTING_SETTING_KEYS);
 
   // Responsive tier. Desktops keep the original wide layout, tablets split the
   // prompt and the POI field into two columns, phones get a single column.
@@ -1227,8 +1277,10 @@ export default function App() {
       answersLocked={answersLocked}
       answerSaving={answersSaving}
       onToggleAnswers={handleToggleAnswers}
-      onResetDefaults={resetSettings}
-      settingsAreDefault={settingsAreDefault}
+      onResetGeneral={resetGeneral}
+      generalAreDefault={generalAreDefault}
+      onResetFormatting={resetFormatting}
+      formattingAreDefault={formattingAreDefault}
     />
   );
 

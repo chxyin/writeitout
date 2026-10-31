@@ -175,7 +175,8 @@ body.night-light::after {
   color: #333;
   padding: 1rem;
   border-radius: 16px;
-  width: 240px;
+  /* Wide enough for the Formatting tab's preview to read as a card. */
+  width: 260px;
   box-shadow: 0 15px 35px rgba(0,0,0,0.35), 0 0 25px rgba(255, 149, 0, 0.25);
   flex-direction: column;
   gap: 12px;
@@ -240,6 +241,68 @@ body.night-light::after {
 .settings-tab:focus-visible { outline: 2px solid var(--accent-orange); outline-offset: 1px; }
 
 .settings-note { font-size: 10px; font-weight: 600; line-height: 1.45; color: #8A8A8E; }
+
+/* ---------- Formatting preview ----------
+   A thumbnail of the drill inside the Formatting tab, so the four sliders have
+   something to move while the panel is open. It is the app's own card on the
+   app's own background, scaled down: same theme colour, same grid, same corner
+   radius, and the numbers come from the sliders (SettingsMenu.jsx), not from a
+   second set of CSS variables. */
+.fmt-preview { padding: 2px 0; }
+.fmt-preview-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 132px;
+  padding: 0 6px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--bg-color);
+  background-image: linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 10px 10px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+.fmt-preview-card {
+  /* Grows into the frame above the composer and clips its own overflow, the way
+     the real card does: more text is what the type-size slider is for, and a
+     thumbnail that reports "too small" by cutting the last line is honest. */
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 auto;
+  overflow: hidden;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: var(--card-bg);
+  color: #fff;
+  line-height: 1.35;
+  text-align: left;
+  transition: width 0.12s ease, font-size 0.12s ease;
+}
+.fmt-preview-tag {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--accent-orange);
+  font-size: 0.46rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fmt-preview-composer {
+  flex: 0 0 auto;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: var(--accent-red);
+  color: #fff;
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+}
 
 /* Panel footer. The sliders clear one value at a time from their readouts; this
    puts every preference back at once, so it sits behind a hairline rather than
@@ -1058,7 +1121,7 @@ textarea:focus {
 }
 body[data-tier="tablet"] .settings-container { top: 16px; right: 16px; }
 body[data-tier="tablet"] .settings-btn { width: 44px; height: 44px; }
-body[data-tier="tablet"] .settings-menu { width: min(260px, calc(100vw - 32px)); }
+body[data-tier="tablet"] .settings-menu { width: min(300px, calc(100vw - 32px)); }
 
 /* ---------- Mobile: fixed app shell, only the speech card scrolls ----------
    The page itself never scrolls on phones. The shell is locked to one screen
@@ -1077,10 +1140,21 @@ body[data-tier="mobile"] {
 .app-container[data-tier="mobile"] {
   --layout-max-single: 680px;
   --layout-max-full: 680px;
-  --layout-gutter-top: max(3.5rem, env(safe-area-inset-top));
-  --layout-gutter-x: 1rem;
+  /* ---- Settings → Formatting, on a phone ----
+     A phone has no floating slab and no card column to narrow, so the four
+     sliders are mapped onto the numbers this layout actually has. Every
+     expression keeps today's look at its default, which is why each one reads
+     "the old fixed value + (slider − default)":
+       top / bottom offset → the space above and below the drill, in vh, clamped
+                             so the chrome and the home indicator always clear
+       card width          → the side gutters, inverted: a wider card is a smaller
+                             gutter, so dragging right really does widen the card
+                             (down to edge-to-edge), and dragging left narrows it
+       text size           → --speech-font-size, which every tier already reads. */
+  --layout-gutter-top: clamp(2.5rem, calc(max(3.5rem, env(safe-area-inset-top)) + (var(--fmt-top-offset) - 10vh)), 30vh);
+  --layout-gutter-x: clamp(0px, calc(1rem + (540px - var(--fmt-card-width)) / 14), 2rem);
   /* Home-indicator clearance on iOS, plain 1rem everywhere else. */
-  --layout-gutter-bottom: max(1rem, env(safe-area-inset-bottom));
+  --layout-gutter-bottom: clamp(0.5rem, calc(max(1rem, env(safe-area-inset-bottom)) + (var(--fmt-bottom-offset) - 10vh) * 0.6), 18vh);
   --layout-gap: 1rem;
   --layout-column-gap: 1rem;
   --layout-textarea-height: 110px;
@@ -1154,7 +1228,15 @@ body[data-tier="mobile"] {
      The padding clears the topic badge, which wraps to three lines on a narrow
      phone; 2.25rem left a two-line badge overlapping the first line of speech.
      The type size comes from --speech-font-size, so the Formatting slider works
-     here too. */
+     here too.
+
+     Width is stated rather than inherited: a card that is "however wide the
+     column happens to be" is what let a stale desktop rule, a zoom step or a
+     swapped-in pane leave the speech as a skinny strip down the middle of the
+     phone. It is always the full column, and the Formatting card width moves the
+     column's gutters rather than the card. */
+  width: 100%;
+  align-self: stretch;
   height: auto;
   max-height: none;
   flex: 1 1 auto;
@@ -1170,6 +1252,43 @@ body[data-tier="mobile"] {
 }
 .app-container[data-tier="mobile"] textarea {
   padding: 1rem;
+}
+/* The 16px floor that stops iOS magnifying the page on focus (see the phone
+   block at the foot of the file, which also covers the start screen). Repeated
+   here because a phone in landscape is wider than 640px and still on this tier. */
+.app-container[data-tier="mobile"] textarea,
+.app-container[data-tier="mobile"] input {
+  font-size: max(16px, calc(16px / var(--ui-scale)));
+}
+/* ---------- Keyboard open (phones) ----------
+   The shell is sized to the visual viewport, so the keyboard pulls the POI field
+   and Submit up over it — that is the point of the hook feeding
+   --app-viewport-height. What it must not do is squeeze the speech card to
+   nothing, which is what "by the second POI you cannot see anything" was: at a
+   ~400px viewport the two fixed bands consumed the whole screen.
+   So while :root[data-keyboard="on"] the shell stops decorating and starts
+   budgeting: the gutters collapse to a hairline (they are there to frame the
+   card, and the card has no room to frame), the mode switch steps aside (it is a
+   reading choice, and nobody switches to Full Speech mid-answer), the card keeps
+   a readable minimum, and if all of that still does not fit the shell becomes a
+   scroller instead of a crusher. useViewportHeight() scrolls back to the top the
+   moment the keyboard goes away. */
+:root[data-keyboard="on"] .app-container[data-tier="mobile"] {
+  --layout-gutter-top: 8px;
+  --layout-gutter-bottom: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:root[data-keyboard="on"] .app-container[data-tier="mobile"] .mode-row {
+  display: none;
+}
+:root[data-keyboard="on"] .app-container[data-tier="mobile"] .left-pane {
+  flex: 0 0 auto;
+}
+:root[data-keyboard="on"] .app-container[data-tier="mobile"] .prompt-card {
+  flex: 0 0 auto;
+  min-height: 88px;
+  padding-top: 2.25rem;
 }
 /* Feedback and session-complete screens take the whole shell. The card itself
    does not scroll: the body does, with the Back/Next footer pinned to the bottom
@@ -1236,7 +1355,9 @@ body[data-tier="mobile"] {
 }
 body[data-tier="mobile"] .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
 body[data-tier="mobile"] .settings-btn { width: 44px; height: 44px; }
-body[data-tier="mobile"] .settings-menu { width: min(260px, calc(100vw - 24px)); right: -4px; }
+/* Wider than the desktop panel: the Formatting tab has a preview to show, and a
+   240px column makes a thumbnail of a card into a postage stamp. */
+body[data-tier="mobile"] .settings-menu { width: min(310px, calc(100vw - 24px)); right: -4px; }
 body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
 
 /* Pre-hydration fallback: without JS the attribute is absent, so keep the
@@ -1996,13 +2117,38 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   .session-badges { order: 2; margin-left: auto; }
 }
 
+/* Phones: the picker takes the card's full width instead of the right-hand 90%
+   it keeps on a wide screen. At 390px the five Timer options wrapped, stranding
+   "Custom" on a line of its own and making the control look broken; the bar was
+   narrowed to look like a control at the end of a long desktop row, and that
+   reasoning does not survive a phone. Segments tighten as well, so six rep
+   options still fit on one line. */
+@media (max-width: 640px) {
+  .splash-screen .segmented-control { width: 100%; margin-left: 0; padding: 2px; gap: 2px; }
+  .splash-screen .seg-btn { padding: 0.34rem 0.42rem; font-size: 0.74rem; letter-spacing: -0.01em; }
+  /* The speech card gives some of its side padding back to the text: 20px a side
+     is 11% of a 390px screen, and the speech is the point of the screen. */
+  .app-container[data-tier="mobile"] .prompt-card { padding: 2.5rem 1rem 1rem; }
+  /* "Exit Task · Full Speech [switch] Solutions Only" is one row of three labels
+     and a switch: at 320px it only fit by running "Solutions Only" into the edge.
+     Smaller, and allowed to break inside itself rather than past the gutter. */
+  .app-container .mode-row .toggle-container { flex-wrap: wrap; justify-content: flex-end; font-size: 12px; gap: 8px; }
+  /* iOS Safari magnifies the page when a focused field computes to less than
+     16px, and does not magnify back out on blur: tapping the POI box left the
+     whole bottom block huge and pushed off the screen. By viewport width rather
+     than by tier, because the start screen's Custom box and the developer view's
+     fields are outside .app-container and hit the same Safari rule. */
+  textarea,
+  input,
+  .splash-screen .seg-input { font-size: max(16px, calc(16px / var(--ui-scale))); }
+}
+
 /* The narrowest phones still in use (320–380px): six rep segments no longer fit
    on one line, and a wrapped bar with "Custom" stranded on a line of its own
    reads as a broken control. Tightening the segments — not dropping any — keeps
    the row whole down to 320px. */
 @media (max-width: 380px) {
-  .splash-screen .segmented-control { padding: 2px; gap: 2px; }
-  .splash-screen .seg-btn { padding: 0.32rem 0.4rem; font-size: 0.72rem; letter-spacing: -0.01em; }
+  .splash-screen .seg-btn { padding: 0.3rem 0.34rem; font-size: 0.68rem; }
 }
 
 /* ---------- Developer statistics (#/admin) ----------
@@ -3676,6 +3822,10 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
    whole line re-keys on change, so this animation is the fade in and the fade out
    in one pass rather than something JavaScript has to schedule.
 
+   Text only: no pill, no border, no blur pane. A box behind a caption reads as a
+   control, and this is the one thing on the screen that is not one. The shadow is
+   what keeps it legible over the grid without drawing a backdrop.
+
    pointer-events: none, because a tip about the Play button must never sit between
    the cursor and the Play button. */
 .hint-strip {
@@ -3686,16 +3836,12 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   z-index: 60;
   pointer-events: none;
   max-width: min(720px, 92vw);
-  padding: 0.4rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(8px);
-  color: rgba(255, 255, 255, 0.84);
+  color: rgba(255, 255, 255, 0.88);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.35;
   text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 0, 0, 0.4);
 }
 .hint-line { display: inline-block; animation: hint-fade 7s ease-in-out both; }
 @keyframes hint-fade {
@@ -3705,7 +3851,7 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
   100% { opacity: 0; transform: translateY(-4px); }
 }
 @media (max-width: 640px) {
-  .hint-strip { bottom: 6px; font-size: 0.66rem; padding: 0.35rem 0.7rem; }
+  .hint-strip { bottom: 6px; font-size: 0.66rem; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7), 0 0 16px rgba(0, 0, 0, 0.5); }
 }
 @media (prefers-reduced-motion: reduce) {
   .hint-line { animation: none; opacity: 1; transform: none; }

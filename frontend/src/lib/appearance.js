@@ -42,8 +42,12 @@ export const BACKGROUND_IDS = BACKGROUNDS.map((option) => option.id);
  */
 export const NIGHT_OFF_KELVIN = 6000;
 
-/** Default 3400K: a warm bulb, about what the old 55% strength looked like. */
-export const NIGHT_KELVIN_RANGE = { min: 1000, max: 6000, step: 100, default: 3400 };
+/**
+ * Default 5000K: a hair warmer than daylight, which is the gentlest setting the
+ * dial can hold that still does something. Anything warmer is a taste, not a
+ * default — 3000K is a bulb and 1000K is a candle, and both are one drag away.
+ */
+export const NIGHT_KELVIN_RANGE = { min: 1000, max: 6000, step: 100, default: 5000 };
 
 /** The three landmarks drawn under the slider. */
 export const NIGHT_KELVIN_MARKS = [
@@ -72,7 +76,7 @@ export function kelvinToRgb(kelvin) {
   let blue;
   if (t >= 66) blue = 255;
   else if (t <= 19) blue = 0;
-  else blue = 97.1197534314 * Math.log(t - 10) - 305.0447927307;
+  else blue = 138.5177312231 * Math.log(t - 10) - 305.0447927307;
   return [round255(red), round255(green), round255(blue)];
 }
 

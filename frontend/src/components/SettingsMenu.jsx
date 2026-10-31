@@ -91,6 +91,47 @@ function SliderRow({ label, value, range, formatValue, onChange, footnote }) {
   );
 }
 
+/**
+ * A thumbnail of the drill, driven by the four Formatting numbers.
+ *
+ * The tab is useless if you cannot see what it does: the panel covers the real
+ * card while it is open, and on a phone the card is the only thing on screen to
+ * begin with. So the preview is the card itself, scaled to the panel — the same
+ * gaps, the same type ratio, the same widths, computed from the same numbers the
+ * sliders hold rather than from CSS variables the panel does not share.
+ *
+ * The three multipliers below compress 0–20vh and 360–960px into panel-sized
+ * pixels; they are a thumbnail's scale, not a second source of truth.
+ */
+function FormattingPreview({ topOffset, bottomOffset, textSize, cardWidth }) {
+  // 360px–960px of card reads as 46%–100% of the preview's width.
+  const widthPercent =
+    46 + ((cardWidth - CARD_WIDTH_RANGE.min) / (CARD_WIDTH_RANGE.max - CARD_WIDTH_RANGE.min)) * 54;
+
+  return (
+    <div className="fmt-preview" aria-hidden="true">
+      <div
+        className="fmt-preview-frame"
+        style={{
+          // 4px of frame on top of the slider's own gap, so the card's rounded
+          // corner never meets the frame's edge and reads as clipped.
+          paddingTop: `${4 + Math.round(topOffset * 0.55)}px`,
+          paddingBottom: `${4 + Math.round(bottomOffset * 0.55)}px`
+        }}
+      >
+        <div
+          className="fmt-preview-card"
+          style={{ width: `${Math.round(widthPercent)}%`, fontSize: `${(textSize * 0.62).toFixed(2)}rem` }}
+        >
+          <span className="fmt-preview-tag">NPT | UNSC · France</span>
+          “The Treaty remains the cornerstone of the disarmament architecture.”
+        </div>
+        <div className="fmt-preview-composer">Submit POI</div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsMenu({
   open,
   onToggle,
@@ -131,8 +172,12 @@ export default function SettingsMenu({
   answersLocked = false,
   answerSaving = false,
   onToggleAnswers,
-  onResetDefaults,
-  settingsAreDefault
+  // One reset per tab: General puts back the page's look, Formatting puts back
+  // the four layout sliders. `*AreDefault` greys the pair out independently.
+  onResetGeneral,
+  generalAreDefault,
+  onResetFormatting,
+  formattingAreDefault
 }) {
   // Kept in component state rather than in the persisted settings: the menu is
   // closed and reopened all the time, and which tab you looked at last is not a
@@ -394,6 +439,12 @@ export default function SettingsMenu({
             </>
           ) : (
             <>
+              <FormattingPreview
+                topOffset={topOffset}
+                bottomOffset={bottomOffset}
+                textSize={textSize}
+                cardWidth={cardWidth}
+              />
               <SliderRow
                 label="Top Offset"
                 value={topOffset}
@@ -423,31 +474,46 @@ export default function SettingsMenu({
                 onChange={onCardWidthChange}
               />
               <p className="settings-note">
-                Tap a value to reset it. Speech text size applies on every screen;
-                the offsets and card width shape the desktop layout, where there is
-                a shell to offset and a card column to narrow.
+                Every screen honours these: the offsets are the margins above and
+                below the drill, and the card width sets how wide the speech is —
+                on a phone a wider card means thinner side margins.
               </p>
             </>
           )}
 
-          {/* One button for the whole panel, so it sits in the same place from
-              either tab: the point of the sliders is to try values out, and this
-              is the way back to the layout the app ships with. Greyed out once
-              every preference already sits at its default. */}
+          {/* One button per tab, so a reset only ever touches the half you are
+              looking at. Each greys out while its own half already sits at the
+              defaults — the same rule the slider readouts follow. */}
           <div className="settings-reset-row">
-            <button
-              type="button"
-              className="settings-reset"
-              onClick={onResetDefaults}
-              disabled={settingsAreDefault}
-              title={
-                settingsAreDefault
-                  ? 'Every setting is already at its default'
-                  : 'Put the toggles, zoom, color, background and every slider back to their defaults'
-              }
-            >
-              Reset to defaults
-            </button>
+            {tab === 'general' ? (
+              <button
+                type="button"
+                className="settings-reset"
+                onClick={onResetGeneral}
+                disabled={generalAreDefault}
+                title={
+                  generalAreDefault
+                    ? 'The general settings are already at their defaults'
+                    : 'Put the switches, night light, hints, theme, background and zoom back to their defaults'
+                }
+              >
+                Reset general settings
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="settings-reset"
+                onClick={onResetFormatting}
+                disabled={formattingAreDefault}
+                title={
+                  formattingAreDefault
+                    ? 'The formatting settings are already at their defaults'
+                    : 'Put the top offset, bottom offset, text size and card width back to their defaults'
+                }
+              >
+                Reset formatting settings
+              </button>
+            )}
           </div>
         </div>
       )}
