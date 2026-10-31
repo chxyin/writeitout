@@ -37,7 +37,10 @@
 - **Mobile layout, tuned.** The speech card is always the full column width
   whatever the tier, the card gives some side padding back to the text on a phone,
   and the Runs/Timer picker takes the card's full width so its five Timer options
-  stop wrapping — "Custom" was landing on a line of its own at 390px.
+  stop wrapping — "Custom" was landing on a line of its own at 390px. In portrait
+  the cards drop their desktop side margins entirely: the speech card hugs a
+  hairline gutter and the start screen's cards sit near edge-to-edge, since a
+  portrait phone has no width to waste on empty blue margins.
 
 ## Version 1.6 - Kelvin Night Light, the Traffic Log and the Stopwatch
 
