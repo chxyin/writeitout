@@ -1281,6 +1281,7 @@ export default function App() {
       generalAreDefault={generalAreDefault}
       onResetFormatting={resetFormatting}
       formattingAreDefault={formattingAreDefault}
+      isMobile={isMobile}
     />
   );
 

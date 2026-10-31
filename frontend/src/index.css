@@ -1140,6 +1140,14 @@ body[data-tier="mobile"] {
 .app-container[data-tier="mobile"] {
   --layout-max-single: 680px;
   --layout-max-full: 680px;
+  /* Zoom is a desktop feature. CSS `zoom` on the phone shell gives iOS Safari a
+     scaled ancestor for the POI field, which is what re-triggers its focus
+     magnify ("zooms in a ton when I start typing") even though the field is
+     16px. Forcing the scale to 1 here — the value the base rule and the inline
+     script both read — makes `zoom: var(--ui-scale)` a no-op and keeps the
+     height/width divisions below at /1, so the layout maths stay correct while
+     the phone no longer zooms at all. */
+  --ui-scale: 1;
   /* ---- Settings → Formatting, on a phone ----
      A phone has no floating slab and no card column to narrow, so the four
      sliders are mapped onto the numbers this layout actually has. Every
@@ -1258,10 +1266,12 @@ body[data-tier="mobile"] {
 }
 /* The 16px floor that stops iOS magnifying the page on focus (see the phone
    block at the foot of the file, which also covers the start screen). Repeated
-   here because a phone in landscape is wider than 640px and still on this tier. */
+   here because a phone in landscape is wider than 640px and still on this tier.
+   A flat 16px rather than a zoom-aware value: the phone tier forces --ui-scale
+   to 1, so the field can never compute below the threshold Safari zooms at. */
 .app-container[data-tier="mobile"] textarea,
 .app-container[data-tier="mobile"] input {
-  font-size: max(16px, calc(16px / var(--ui-scale)));
+  font-size: 16px;
 }
 /* ---------- Keyboard open (phones) ----------
    The shell is sized to the visual viewport, so the keyboard pulls the POI field
@@ -1356,7 +1366,7 @@ body[data-tier="mobile"] {
   /* 42% of the visible screen, corrected for the zoom factor. */
   max-height: calc(0.42 * var(--app-viewport-height, 100dvh) / var(--ui-scale));
 }
-body[data-tier="mobile"] .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; }
+body[data-tier="mobile"] .settings-container { top: max(12px, env(safe-area-inset-top)); right: 12px; zoom: 1; }
 body[data-tier="mobile"] .settings-btn { width: 44px; height: 44px; }
 /* Wider than the desktop panel: the Formatting tab has a preview to show, and a
    240px column makes a thumbnail of a card into a postage stamp. */
@@ -2141,10 +2151,11 @@ body[data-tier="mobile"] .paper { opacity: 0.55; box-shadow: 0 6px 16px rgba(0,0
      16px, and does not magnify back out on blur: tapping the POI box left the
      whole bottom block huge and pushed off the screen. By viewport width rather
      than by tier, because the start screen's Custom box and the developer view's
-     fields are outside .app-container and hit the same Safari rule. */
+     fields are outside .app-container and hit the same Safari rule. A flat 16px:
+     the phone tier no longer zooms, so there is no zoom factor to compensate. */
   textarea,
   input,
-  .splash-screen .seg-input { font-size: max(16px, calc(16px / var(--ui-scale))); }
+  .splash-screen .seg-input { font-size: 16px; }
 }
 
 /* Mobile portrait: the start screen's cards sit edge-to-edge. The 2rem inner

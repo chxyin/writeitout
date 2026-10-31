@@ -177,7 +177,10 @@ export default function SettingsMenu({
   onResetGeneral,
   generalAreDefault,
   onResetFormatting,
-  formattingAreDefault
+  formattingAreDefault,
+  // Zoom is desktop-only. On a phone it is hidden (see the note in the render)
+  // because CSS zoom on the shell is what re-triggers iOS focus magnification.
+  isMobile = false
 }) {
   // Kept in component state rather than in the persisted settings: the menu is
   // closed and reopened all the time, and which tab you looked at last is not a
@@ -399,13 +402,19 @@ export default function SettingsMenu({
                   </button>
                 </div>
               )}
-              <SliderRow
-                label="Zoom"
-                value={zoom}
-                range={ZOOM_RANGE}
-                formatValue={asPercent}
-                onChange={onZoomChange}
-              />
+              {/* Zoom is a desktop nicety. On a phone it is hidden rather than
+                  left to do nothing: the phone tier forces its scale to 1, and
+                  CSS zoom on the shell is what makes iOS magnify the POI field
+                  on focus. Desktop keeps the row and the behaviour. */}
+              {!isMobile && (
+                <SliderRow
+                  label="Zoom"
+                  value={zoom}
+                  range={ZOOM_RANGE}
+                  formatValue={asPercent}
+                  onChange={onZoomChange}
+                />
+              )}
               <div style={{ height: '1px', background: '#ddd', margin: '4px 0' }}></div>
               <div className="setting-item">
                 <span>Color</span>

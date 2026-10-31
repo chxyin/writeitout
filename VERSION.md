@@ -31,9 +31,13 @@
   aside, holds a readable card and scrolls if it must; losing focus, closing the
   keyboard, returning to the tab, rotating and submitting all return the layout to
   the top.
-- **iOS focus zoom.** Form fields are pinned to a rendered 16px on phones (divided
-  by the zoom factor), which is the threshold Safari uses before it magnifies the
-  page on focus and never zooms back out.
+- **iOS focus zoom.** The phone shell no longer applies CSS zoom at all (the
+  `--ui-scale` is forced to 1 on the mobile tier and the Zoom row is hidden in
+  Settings), and form fields are pinned to a flat 16px — the threshold Safari uses
+  before it magnifies the page on focus. With no zoomed ancestor and a 16px field,
+  there is nothing left for Safari to magnify. Leaving the field resets the layout
+  twice — once immediately and once 500ms later, after the keyboard finishes
+  sliding out — so the bottom band lands back at the bottom instead of riding up.
 - **Mobile layout, tuned.** The speech card is always the full column width
   whatever the tier, the card gives some side padding back to the text on a phone,
   and the Runs/Timer picker takes the card's full width so its five Timer options

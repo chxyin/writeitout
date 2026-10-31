@@ -74,12 +74,21 @@ export default function useViewportHeight() {
 
     const onFocusOut = () => {
       // A tap on Submit blurs the field first and submits second, so this runs
-      // before the next rep is drawn: giving the new rep a page at the top is
-      // what keeps the second POI as visible as the first.
+      // before the next rep is drawn: giving the new rep a page at the top is what
+      // keeps the second POI as visible as the first.
+      //
+      // Reset twice — once now and once 500ms later — because iOS settles the
+      // keyboard and the visual viewport asynchronously. A single immediate reset
+      // lands while the keyboard is still animating away (the visual viewport is
+      // still short), so the shell snaps back to "keyboard size" and the bottom
+      // band stays riding up. The 500ms reset lands on the settled layout, which
+      // is what puts the field and Submit back at the bottom edge.
+      resetScroll();
+      sync();
       window.setTimeout(() => {
         resetScroll();
         sync();
-      }, 0);
+      }, 500);
     };
 
     const onVisibility = () => {

@@ -418,11 +418,15 @@ and Submit stay above the on-screen keyboard. Three consequences are handled the
   does not fit.
 - **Coming back must land at the top.** iOS scrolls the page to reveal a focused
   field and does not undo it. Losing focus, closing the keyboard, returning to the
-  tab, rotating and submitting all call the same idempotent reset.
+  tab, rotating and submitting all call the same idempotent reset — and losing
+  focus runs it twice, immediately and 500ms later, because the keyboard and the
+  visual viewport settle asynchronously after blur.
 - **iOS focus zoom** is a browser behaviour, not a layout bug: Safari magnifies the
   page when a focused field computes to less than 16px and does not zoom out
-  again. The fix is the threshold, not `user-scalable=no`: form fields on phones
-  are pinned to a rendered 16px (`max(16px, calc(16px / var(--ui-scale)))`).
+  again. The fix is to remove every trigger rather than `user-scalable=no`: the
+  mobile tier forces `--ui-scale: 1` (so the shell has no CSS `zoom` ancestor for
+  the field), hides the Zoom row in Settings, and pins form fields to a flat 16px.
+  A Zoom value saved earlier is simply ignored on phones.
 
 ## The rep timer, including Chrono
 
