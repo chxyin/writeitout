@@ -398,6 +398,13 @@ properties (`src/lib/formatting.js`) and read by `index.css`.
 - **Reset is per tab**: one button for General, one for Formatting, each disabled
   while its own half already sits at the defaults.
 
+The saved values are also written by an inline script in `index.html` before the
+app bundle runs. The stylesheet's `:root` defaults would otherwise paint first
+and the saved numbers a moment later — a flash on fast machines, a "wrong size
+until I touch a slider" on slow or old ones, where a post-load custom-property
+write is not always repainted. The inline script clamps defensively and falls
+back to the same defaults, so it can never disagree with the app.
+
 ## Mobile
 
 The mobile tier is a fixed-height shell that follows the visible viewport

@@ -14,7 +14,10 @@
   shell only, so on a phone three of them moved nothing. They are now mapped onto
   the numbers the phone layout has: top and bottom offset are the space above and
   below the drill, card width is the side margins (right widens the card, left
-  narrows it), text size as before.
+  narrows it), text size as before. The saved values are also written by a tiny
+  inline script before the app loads, so the first frame is already the layout you
+  saved — an old browser that would not repaint a post-load custom-property write
+  no longer shows a wrong size until a slider is touched.
 - **A preview in the Formatting tab.** A thumbnail of the drill on the app's own
   background, driven by the same four values, so a change is visible while the
   panel is open — the panel covers the card, and on a phone the card is the whole

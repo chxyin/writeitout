@@ -8,6 +8,33 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- First-paint preferences: write the four Formatting numbers and Zoom onto
+         the DOM before the app bundle runs, so a saved layout is already right on
+         the very first frame. Without this the stylesheet's :root defaults paint
+         first and the saved values land a moment later (a flash on fast machines,
+         a visible "wrong size until I touch a slider" on slow or old ones, where a
+         post-load custom-property write is not always repainted). The values are
+         defensive: anything missing or malformed falls back to the same defaults
+         index.css and src/lib/formatting.js already agree on. -->
+    <script>
+      (function () {
+        try {
+          var saved = JSON.parse(localStorage.getItem('writeitout:settings') || 'null');
+          if (!saved || typeof saved !== 'object') return;
+          var clamp = function (value, fallback, min, max) {
+            if (value === undefined || value === null || value === '') return fallback;
+            var n = Number(value);
+            if (n !== n) return fallback; // NaN
+            return Math.min(max, Math.max(min, n));
+          };
+          document.body.style.setProperty('--fmt-top-offset', clamp(saved.topOffset, 10, 0, 20) + 'vh');
+          document.body.style.setProperty('--fmt-bottom-offset', clamp(saved.bottomOffset, 10, 0, 20) + 'vh');
+          document.body.style.setProperty('--fmt-speech-font-size', clamp(saved.textSize, 1.1, 0.85, 1.6) + 'rem');
+          document.body.style.setProperty('--fmt-card-width', clamp(saved.cardWidth, 540, 360, 960) + 'px');
+          document.documentElement.style.setProperty('--ui-scale', String(clamp(saved.zoom, 1, 0.8, 1.6)));
+        } catch (e) { /* a blocked or corrupted store just starts at defaults */ }
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

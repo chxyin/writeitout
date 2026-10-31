@@ -7,8 +7,12 @@
 // stale localStorage entry, a hand-edited blob or a loose string from an
 // <input type="range"> can only ever produce a usable number.
 //
-// The values reach CSS as custom properties (see formattingVars) that index.css
-// reads only inside its desktop media query.
+// The values reach CSS as custom properties (see formattingVars). The speech
+// text size is read by every tier; the offsets and card width shape the desktop
+// shell directly and are mapped onto the phone layout's gutters in index.css.
+// index.html also writes the four of them from localStorage before the app
+// loads, so the saved layout is right on the first paint — keep the defaults
+// here and in index.css in step with that inline script.
 
 /** How far the interface sits from the top edge, in vh. */
 export const TOP_OFFSET_RANGE = { min: 0, max: 20, step: 1, default: 10 };
